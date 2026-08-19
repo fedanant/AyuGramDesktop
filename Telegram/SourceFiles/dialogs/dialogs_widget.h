@@ -17,6 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "api/api_single_message_search.h"
 
+namespace Ayu {
+class UnreadMentionsModel;
+} // namespace Ayu
+
 namespace MTP {
 class Error;
 } // namespace MTP
@@ -210,6 +214,7 @@ private:
 	void setupMainMenuToggle();
 	void setupMoreChatsBar();
 	void setupDownloadBar();
+	void setupUnreadMentions();
 	void setupShortcuts();
 	void setupStories();
 	void setupSwipeBack();
@@ -342,6 +347,8 @@ private:
 	InnerWidget *_inner = nullptr;
 	std::unique_ptr<Suggestions> _suggestions;
 	std::vector<std::unique_ptr<Suggestions>> _hidingSuggestions;
+	std::unique_ptr<Ayu::UnreadMentionsModel> _mentionsModel;
+	object_ptr<Ui::AbstractButton> _mentionsButton = { nullptr };
 	class BottomButton;
 	object_ptr<BottomButton> _updateTelegram = { nullptr };
 	object_ptr<BottomButton> _loadMoreChats = { nullptr };
@@ -369,6 +376,9 @@ private:
 	bool _searchSuggestionsLocked = false;
 	bool _searchHasFocus = false;
 	bool _processingSearch = false;
+	bool _mentionsLoading = false;
+	bool _mentionsComplete = false;
+	bool _mentionsCountVisible = false;
 
 	rpl::event_stream<rpl::producer<Stories::Content>> _storiesContents;
 	base::flat_map<PeerId, Ui::PeerUserpicView> _storiesUserpicsViewsHidden;

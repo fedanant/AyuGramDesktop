@@ -97,3 +97,6 @@
 [submodule "Telegram/lib_icu"]
 	path = Telegram/lib_icu
 	url = https://github.com/AyuGram/lib_icu.git
+[submodule "Telegram/ThirdParty/tg-ws-proxy"]
+	path = Telegram/ThirdParty/tg-ws-proxy
+	url = https://github.com/Flowseal/tg-ws-proxy.git

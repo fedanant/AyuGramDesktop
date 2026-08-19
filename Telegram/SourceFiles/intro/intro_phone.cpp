@@ -7,27 +7,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_phone.h"
 
-#include "lang/lang_keys.h"
-#include "intro/intro_code.h"
-#include "intro/intro_email.h"
-#include "intro/intro_qr.h"
-#include "styles/style_intro.h"
-#include "ui/widgets/buttons.h"
-#include "ui/widgets/labels.h"
-#include "ui/wrap/fade_wrap.h"
-#include "ui/widgets/fields/special_fields.h"
-#include "main/main_account.h"
-#include "main/main_domain.h"
-#include "main/main_app_config.h"
-#include "main/main_session.h"
-#include "data/data_user.h"
-#include "ui/boxes/confirm_box.h"
+#include "ayu/ui/boxes/custom_endpoint_box.h"
 #include "boxes/abstract_box.h"
 #include "boxes/phone_banned_box.h"
 #include "core/application.h"
+#include "countries/countries_instance.h" // Countries::Groups
+#include "data/data_user.h"
+#include "intro/intro_code.h"
+#include "intro/intro_email.h"
+#include "intro/intro_qr.h"
+#include "lang/lang_keys.h"
+#include "lang_auto.h"
+#include "main/main_account.h"
+#include "main/main_app_config.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
+#include "mtproto/mtp_instance.h"
+#include "mtproto/mtproto_dc_options.h"
+#include "ui/boxes/confirm_box.h"
+#include "ui/widgets/fields/special_fields.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
+#include "ui/wrap/fade_wrap.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
-#include "countries/countries_instance.h" // Countries::Groups
+
+#include "styles/style_intro.h"
 
 namespace Intro {
 namespace details {
@@ -43,6 +48,34 @@ namespace {
 [[nodiscard]] QString DigitsOnly(QString value) {
 	static const auto RegExp = QRegularExpression("[^0-9]");
 	return value.replace(RegExp, QString());
+}
+
+[[nodiscard]] auto ConfirmedEndpointSummary(
+		not_null<Main::Account*> account)
+-> rpl::producer<QString> {
+	const auto options = &account->mtp().dcOptions();
+	return (rpl::single() | rpl::then(
+		options->confirmedCustomEndpointProfileChanged()
+	)) | rpl::map([=] {
+		const auto profile = options->confirmedCustomEndpointProfile();
+		if (!profile) {
+			return tr::ayu_custom_endpoints_summary_default();
+		}
+		return tr::ayu_custom_endpoints_summary_custom(
+			lt_count,
+			rpl::single(float64(profile->endpoints.size()))
+				| tr::to_count());
+	}) | rpl::flatten_latest();
+}
+
+[[nodiscard]] auto CustomEndpointLinkText(
+		not_null<Main::Account*> account)
+-> rpl::producer<QString> {
+	return ConfirmedEndpointSummary(account) | rpl::map([](QString summary) {
+		return tr::ayu_custom_endpoints_auth_link(
+			lt_status,
+			rpl::single(std::move(summary)));
+	}) | rpl::flatten_latest();
 }
 
 } // namespace
@@ -61,6 +94,8 @@ PhoneWidget::PhoneWidget(
 	this,
 	st::introPhone,
 	[](const QString &s) { return Countries::Groups(s); })
+, _endpointLink(this, QString(), st::introLink)
+, _qrLoginLink(this, QString(), st::introLink)
 , _checkRequestTimer([=] { checkRequest(); }) {
 	_code->setAccessibleName(tr::lng_country_code(tr::now));
 	_phone->setAccessibleName(tr::lng_phone_number(tr::now));
@@ -96,7 +131,15 @@ PhoneWidget::PhoneWidget(
 		countryChanged();
 	}, lifetime());
 	setErrorCentered(true);
+	setupCustomEndpoint();
 	setupQrLogin();
+	rpl::combine(
+		sizeValue(),
+		_endpointLink->widthValue(),
+		_qrLoginLink->widthValue()
+	) | rpl::on_next([=](QSize, int, int) {
+		updateLinksGeometry();
+	}, lifetime());
 
 	if (!_country->chooseCountry(getData()->country)) {
 		_country->chooseCountry(u"US"_q);
@@ -108,26 +151,56 @@ QString PhoneWidget::accessibilityName() {
 	return tr::lng_phone_title(tr::now);
 }
 
+void PhoneWidget::setupCustomEndpoint() {
+	_endpointLink->show();
+	CustomEndpointLinkText(&account()) | rpl::on_next([=](QString text) {
+		_endpointLink->setText(text);
+		_endpointLink->setAccessibleName(text);
+	}, _endpointLink->lifetime());
+	_endpointLink->setClickedCallback([=] {
+		Ayu::ShowCustomEndpointBox(
+			getData()->controller->uiShow(),
+			&account());
+	});
+}
+
 void PhoneWidget::setupQrLogin() {
-	const auto qrLogin = Ui::CreateChild<Ui::LinkButton>(
-		this,
-		tr::lng_phone_to_qr(tr::now));
-	qrLogin->show();
-
-	DEBUG_LOG(("PhoneWidget.qrLogin link created and shown."));
-
-	rpl::combine(
-		sizeValue(),
-		qrLogin->widthValue()
-	) | rpl::on_next([=](QSize size, int qrLoginWidth) {
-		qrLogin->moveToLeft(
-			(size.width() - qrLoginWidth) / 2,
-			contentTop() + st::introQrLoginLinkTop);
-	}, qrLogin->lifetime());
-
-	qrLogin->setClickedCallback([=] {
+	_qrLoginLink->show();
+	tr::lng_phone_to_qr() | rpl::on_next([=](QString text) {
+		_qrLoginLink->setText(std::move(text));
+	}, _qrLoginLink->lifetime());
+	_qrLoginLink->setClickedCallback([=] {
 		goReplace<QrWidget>(Animate::Forward);
 	});
+}
+
+void PhoneWidget::updateLinksGeometry() {
+	const auto availableWidth = _country->width();
+	const auto endpointWidth = _endpointLink->width();
+	const auto qrWidth = _qrLoginLink->width();
+	const auto linksWidth = endpointWidth
+		+ st::introPhoneAuthLinksHorizontalSkip
+		+ qrWidth;
+	const auto linksTop = contentTop() + st::introPhoneAuthLinksTop;
+	if (linksWidth <= availableWidth) {
+		const auto linksLeft = contentLeft()
+			+ (availableWidth - linksWidth) / 2;
+		_endpointLink->moveToLeft(linksLeft, linksTop);
+		_qrLoginLink->moveToLeft(
+			linksLeft
+				+ endpointWidth
+				+ st::introPhoneAuthLinksHorizontalSkip,
+			linksTop);
+	} else {
+		_endpointLink->moveToLeft(
+			contentLeft() + (availableWidth - endpointWidth) / 2,
+			linksTop
+				- _endpointLink->height()
+				- st::introPhoneAuthLinksVerticalSkip);
+		_qrLoginLink->moveToLeft(
+			contentLeft() + (availableWidth - qrWidth) / 2,
+			linksTop);
+	}
 }
 
 void PhoneWidget::resizeEvent(QResizeEvent *e) {
@@ -136,6 +209,11 @@ void PhoneWidget::resizeEvent(QResizeEvent *e) {
 	auto phoneTop = _country->y() + _country->height() + st::introPhoneTop;
 	_code->moveToLeft(contentLeft(), phoneTop);
 	_phone->moveToLeft(contentLeft() + _country->width() - st::introPhone.width, phoneTop);
+	updateLinksGeometry();
+}
+
+int PhoneWidget::errorTop() const {
+	return contentTop() + st::introPhoneErrorTop;
 }
 
 void PhoneWidget::showPhoneError(rpl::producer<QString> text) {
@@ -159,7 +237,9 @@ void PhoneWidget::phoneChanged() {
 }
 
 void PhoneWidget::submit() {
-	if (_sentRequest || isHidden()) {
+	if (_sentRequest
+		|| isHidden()
+		|| account().mtp().dcOptions().customEndpointCandidateActive()) {
 		return;
 	}
 

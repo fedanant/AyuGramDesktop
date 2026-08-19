@@ -100,9 +100,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QTextEdit>
 
 // AyuGram includes
-#include "ayu/ayu_settings.h"
+#include "ayu/mentions/unread_mentions_model.h"
+#include "ayu/ui/boxes/unread_mentions_box.h"
 #include "ayu/utils/taptic_engine/taptic_engine.h"
 #include "ayu/utils/telegram_helpers.h"
+#include "ayu/ayu_settings.h"
 
 
 namespace Dialogs {
@@ -238,6 +240,147 @@ base::options::toggle OptionForumHideChatsList({
 } // namespace
 
 const char kOptionForumHideChatsList[] = "forum-hide-chats-list";
+
+namespace {
+
+struct MentionsButtonDisplay {
+	int count = 0;
+	bool loading = false;
+
+	friend inline bool operator==(
+		const MentionsButtonDisplay &,
+		const MentionsButtonDisplay &) = default;
+};
+
+class MentionsButton final : public Ui::RippleButton {
+public:
+	explicit MentionsButton(QWidget *parent);
+
+	void setDisplay(bool loading, int count);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	rpl::variable<MentionsButtonDisplay> _display;
+	std::unique_ptr<Ui::InfiniteRadialAnimation> _spinner;
+
+};
+
+[[nodiscard]] auto MentionsButtonAccessibility(
+		const MentionsButtonDisplay &display)
+-> rpl::producer<QString> {
+	return display.loading
+		? tr::ayu_unread_mentions_button_loading()
+		: tr::ayu_unread_mentions_button_count(
+			lt_count,
+			rpl::single(float64(display.count)));
+}
+
+MentionsButton::MentionsButton(QWidget *parent)
+: RippleButton(parent, st::dialogsUnreadMentionsRipple) {
+	resize(st::columnMinimalWidthLeft, st::dialogsUnreadMentionsHeight);
+	setFocusPolicy(Qt::StrongFocus);
+	_display.value(
+	) | rpl::map([](const MentionsButtonDisplay &display) {
+		return MentionsButtonAccessibility(display);
+	}) | rpl::flatten_latest(
+	) | rpl::on_next([=](QString text) {
+		setAccessibleName(std::move(text));
+	}, lifetime());
+}
+
+void MentionsButton::setDisplay(bool loading, int count) {
+	const auto display = MentionsButtonDisplay{
+		.count = loading ? 0 : std::max(count, 0),
+		.loading = loading,
+	};
+	if (_display.current() == display) {
+		return;
+	}
+	if (_display.current().loading != loading) {
+		_spinner = loading
+			? std::make_unique<Ui::InfiniteRadialAnimation>(
+				[=] { update(); },
+				st::dialogsUnreadMentionsSpinner)
+			: nullptr;
+		if (_spinner) {
+			_spinner->start();
+		}
+	}
+	_display = display;
+	update();
+}
+
+void MentionsButton::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	const auto focused = hasFocus();
+	const auto active = isOver() || focused;
+	p.fillRect(
+		e->rect(),
+		focused
+			? st::dialogsUnreadMentionsBgFocused
+			: active
+			? st::dialogsUnreadMentionsBgOver
+			: st::dialogsUnreadMentionsBg);
+	paintRipple(p, 0, 0);
+	if (focused) {
+		auto pen = QPen(st::dialogsUnreadMentionsFocusFg->c);
+		pen.setWidth(st::dialogsUnreadMentionsFocusWidth);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+		const auto margin = st::dialogsUnreadMentionsFocusMargin;
+		const auto radius = st::dialogsUnreadMentionsFocusRadius;
+		p.drawRoundedRect(
+			rect().marginsRemoved(QMargins(
+				margin,
+				margin,
+				margin,
+				margin)),
+			radius,
+			radius);
+	}
+
+	const auto display = _display.current();
+	if (display.loading && _spinner) {
+		_spinner->draw(
+			p,
+			st::dialogsUnreadMentionsSpinnerPosition,
+			width());
+		return;
+	}
+	(active
+		? st::dialogsUnreadMentionsIconOver
+		: st::dialogsUnreadMentionsIcon).paint(
+			p,
+			st::dialogsUnreadMentionsIconPosition,
+			width());
+	if (display.count <= 0) {
+		return;
+	}
+
+	const auto text = QString::number(display.count);
+	const auto textWidth = st::dialogsUnreadMentionsBadgeFont->width(text);
+	const auto badgeWidth = std::max(
+		st::dialogsUnreadMentionsBadgeMinWidth,
+		textWidth + 2 * st::dialogsUnreadMentionsBadgePadding);
+	const auto badge = QRect(
+		width() - st::dialogsUnreadMentionsBadgeRight - badgeWidth,
+		st::dialogsUnreadMentionsBadgeTop,
+		badgeWidth,
+		st::dialogsUnreadMentionsBadgeHeight);
+	p.setPen(Qt::NoPen);
+	p.setBrush(st::dialogsUnreadMentionsBadgeBg);
+	p.drawRoundedRect(
+		badge,
+		badge.height() / 2.,
+		badge.height() / 2.);
+	p.setFont(st::dialogsUnreadMentionsBadgeFont);
+	p.setPen(st::dialogsUnreadMentionsBadgeFg);
+	p.drawText(badge, text, style::al_center);
+}
+
+} // namespace
 
 class Widget::BottomButton : public Ui::RippleButton {
 public:
@@ -786,6 +929,9 @@ Widget::Widget(
 
 	setupFrozenAccountBar();
 	setupTopBarSuggestions();
+	if (_layout == Layout::Main) {
+		setupUnreadMentions();
+	}
 }
 
 void Widget::setupSwipeBack() {
@@ -1397,6 +1543,35 @@ void Widget::setupConnectingWidget() {
 		controller()->adaptive().oneColumnValue());
 }
 
+void Widget::setupUnreadMentions() {
+	Expects(_layout == Layout::Main);
+	_mentionsModel = std::make_unique<Ayu::UnreadMentionsModel>(&session());
+	auto button = object_ptr<MentionsButton>(this);
+	const auto raw = button.data();
+	raw->hide();
+	_mentionsButton = std::move(button);
+	raw->setClickedCallback([=] {
+		Ayu::ShowUnreadMentionsBox(controller(), _mentionsModel.get());
+	});
+	_mentionsModel->stateValue(
+	) | rpl::on_next([=](const Ayu::UnreadMentionsState &state) {
+		const auto loading = !state.complete;
+		const auto complete = state.complete;
+		const auto countVisible = complete && (state.count > 0);
+		raw->setDisplay(loading, countVisible ? state.count : 0);
+		if (_mentionsLoading == loading
+			&& _mentionsComplete == complete
+			&& _mentionsCountVisible == countVisible) {
+			return;
+		}
+		_mentionsLoading = loading;
+		_mentionsComplete = complete;
+		_mentionsCountVisible = countVisible;
+		updateControlsVisibility();
+		updateControlsGeometry();
+	}, raw->lifetime());
+}
+
 void Widget::setupSupportMode() {
 	if (!session().supportMode()) {
 		return;
@@ -1651,6 +1826,17 @@ void Widget::fullSearchRefreshOn(rpl::producer<> events) {
 void Widget::updateControlsVisibility(bool fast) {
 	updateLoadMoreChatsVisibility();
 	_scroll->setVisible(!_suggestions && _hidingSuggestions.empty());
+	if (_mentionsButton) {
+		_mentionsButton->setVisible(
+			(_layout == Layout::Main)
+			&& !_openedForum
+			&& !_suggestions
+			&& _hidingSuggestions.empty()
+			&& !_hideChildListCanvas
+			&& !_childList
+			&& (_mentionsLoading
+				|| (_mentionsComplete && _mentionsCountVisible)));
+	}
 	updateStoriesVisibility();
 	if ((_openedFolder || _openedForum) && _searchHasFocus) {
 		setInnerFocus();
@@ -1841,6 +2027,9 @@ void Widget::updateSuggestions(anim::type animated) {
 						&std::unique_ptr<Suggestions>::get),
 					end(_hidingSuggestions));
 				updateControlsVisibility();
+				if (_mentionsButton) {
+					updateControlsGeometry();
+				}
 			});
 			_hidingSuggestions.push_back(std::move(_suggestions));
 		} else {
@@ -1848,6 +2037,9 @@ void Widget::updateSuggestions(anim::type animated) {
 			_hidingSuggestions.clear();
 			storiesExplicitCollapse();
 			updateControlsVisibility();
+			if (_mentionsButton) {
+				updateControlsGeometry();
+			}
 			_scroll->show();
 		}
 	} else if (suggest && !_suggestions) {
@@ -1913,6 +2105,7 @@ void Widget::updateSuggestions(anim::type animated) {
 			closeSuggestions();
 		}, _suggestions->lifetime());
 
+		updateControlsVisibility();
 		updateControlsGeometry();
 
 		_suggestions->show(animated, [=] {
@@ -1967,6 +2160,9 @@ void Widget::changeOpenedSubsection(
 	change();
 	refreshTopBars();
 	updateControlsVisibility(true);
+	if (_mentionsButton) {
+		updateControlsGeometry();
+	}
 	_peerSearch.clear();
 	_api.request(base::take(_topicSearchRequest)).cancel();
 	if (animated == anim::type::normal) {
@@ -2568,6 +2764,9 @@ void Widget::slideFinished() {
 	_showAnimation = nullptr;
 	_shownProgressValue = 1.;
 	updateControlsVisibility(true);
+	if (_mentionsButton) {
+		updateControlsGeometry();
+	}
 	if ((!_subsectionTopBar || !_subsectionTopBar->searchHasFocus())
 		&& !_searchHasFocus) {
 		controller()->widget()->setInnerFocus();
@@ -3591,8 +3790,8 @@ void Widget::openChildList(
 		}
 	}, shadow->lifetime());
 
-	updateControlsGeometry();
 	updateControlsVisibility(true);
+	updateControlsGeometry();
 
 	if (animated) {
 		_childList->showAnimated(Window::SlideDirection::FromRight, slide);
@@ -3652,11 +3851,19 @@ void Widget::closeChildList(anim::type animated) {
 		});
 		animation->setFinishedCallback([=] {
 			destroyChildListCanvas();
+			updateControlsVisibility();
+			if (_mentionsButton) {
+				updateControlsGeometry();
+			}
 		});
 		animation->setPixmaps(oldContentCache, newContentCache);
 		animation->start();
 	} else {
 		_childListShadow = nullptr;
+		updateControlsVisibility();
+		if (_mentionsButton) {
+			updateControlsGeometry();
+		}
 	}
 	updateStoriesVisibility();
 	updateForceDisplayWide();
@@ -4148,6 +4355,7 @@ void Widget::updateControlsGeometry() {
 				buttonHeight);
 		}
 	};
+	putBottomButton(_mentionsButton);
 	putBottomButton(_updateTelegram);
 	putBottomButton(_downloadBar);
 	putBottomButton(_loadMoreChats);

@@ -8,6 +8,7 @@
 
 #include "ayu/ayu_lang.h"
 #include "ayu/ayu_settings.h"
+#include "ayu/tg_ws_proxy.h"
 #include "ayu/ayu_ui_settings.h"
 #include "ayu/ayu_worker.h"
 #include "ayu/data/ayu_database.h"
@@ -67,6 +68,10 @@ void initIcon() {
 #endif
 }
 
+void initTgWsProxy() {
+	Ayu::StartTgWsProxy();
+}
+
 void init() {
 	initLang();
 	initDatabase();
@@ -75,6 +80,11 @@ void init() {
 	initWorker();
 	initRCManager();
 	initTranslator();
+	initTgWsProxy();
+}
+
+void finish() {
+	Ayu::StopTgWsProxy();
 }
 
 }

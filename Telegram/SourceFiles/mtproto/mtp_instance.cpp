@@ -65,6 +65,7 @@ public:
 	[[nodiscard]] DcOptions &dcOptions() const;
 	[[nodiscard]] Environment environment() const;
 	[[nodiscard]] bool isTestMode() const;
+	[[nodiscard]] bool isEndpointTestMode() const;
 
 	void resolveProxyDomain(const QString &host);
 	void setGoodProxyDomain(const QString &host, const QString &ip);
@@ -77,8 +78,10 @@ public:
 	[[nodiscard]] rpl::producer<> writeKeysRequests() const;
 
 	void dcPersistentKeyChanged(DcId dcId, const AuthKeyPtr &persistentKey);
+	void updateActiveEndpointKeys();
 	void dcTemporaryKeyChanged(DcId dcId);
 	[[nodiscard]] rpl::producer<DcId> dcTemporaryKeyChanged() const;
+	[[nodiscard]] bool mainDcHasBoundKeyPair() const;
 	[[nodiscard]] AuthKeysList getKeysForWrite() const;
 	void addKeysForDestroy(AuthKeysList &&keys);
 	[[nodiscard]] rpl::producer<> allKeysDestroyed() const;
@@ -158,6 +161,7 @@ public:
 	void setUpdatesHandler(Fn<void(const Response&)> handler);
 	void setGlobalFailHandler(
 		Fn<void(const Error&, const Response&)> handler);
+	[[nodiscard]] rpl::producer<ConnectionState> connectionStateChanges() const;
 	void setStateChangedHandler(Fn<void(ShiftedDcId shiftedDcId, int32 state)> handler);
 	void setSessionResetHandler(Fn<void(ShiftedDcId shiftedDcId)> handler);
 	void clearGlobalHandlers();
@@ -253,6 +257,9 @@ private:
 	crl::time _configExpiresAt = 0;
 
 	base::flat_map<DcId, AuthKeyPtr> _keysForWrite;
+	base::flat_map<DcId, AuthKeyPtr> _officialKeysForWrite;
+	base::flat_map<DcId, AuthKeyPtr> _customKeysForWrite;
+	bool _isCustomEndpointActive = false;
 	base::flat_map<ShiftedDcId, mtpRequestId> _logoutGuestRequestIds;
 
 	rpl::event_stream<> _writeKeysRequests;
@@ -283,6 +290,7 @@ private:
 
 	Fn<void(const Response&)> _updatesHandler;
 	Fn<void(const Error&, const Response&)> _globalFailHandler;
+	rpl::event_stream<ConnectionState> _connectionStateChanges;
 	Fn<void(ShiftedDcId shiftedDcId, int32 state)> _stateChangedHandler;
 	Fn<void(ShiftedDcId shiftedDcId)> _sessionResetHandler;
 
@@ -316,6 +324,7 @@ Instance::Private::Private(
 , _networkReachability(base::NetworkReachability::Instance())
 , _proxySettings(Core::App().settings().proxy()) {
 	Expects(_config != nullptr);
+	Expects(!isEndpointTestMode() || fields.keys.empty());
 
 	const auto idealThreadPoolSize = QThread::idealThreadCount();
 	_fileSessionThreads.resize(2 * std::max(idealThreadPoolSize / 2, 1));
@@ -343,6 +352,7 @@ Instance::Private::Private(
 		reInitConnection(mainDcId());
 	}, _lifetime);
 
+	_isCustomEndpointActive = _config->dcOptions().hasCustomEndpoint();
 	for (auto &key : fields.keys) {
 		auto dcId = key->dcId();
 		auto shiftedDcId = dcId;
@@ -355,6 +365,11 @@ Instance::Private::Private(
 				shiftedDcId = MTP::destroyKeyNextDcId(shiftedDcId);
 			}
 		}
+		if (_isCustomEndpointActive) {
+			_customKeysForWrite[shiftedDcId] = key;
+		} else {
+			_officialKeysForWrite[shiftedDcId] = key;
+		}
 		_keysForWrite[shiftedDcId] = key;
 		addDc(shiftedDcId, std::move(key));
 	}
@@ -363,6 +378,16 @@ Instance::Private::Private(
 		_mainDcId = fields.mainDcId;
 		_mainDcIdForced = true;
 	}
+
+	_config->dcOptions().changed(
+	) | rpl::on_next([=] {
+		updateActiveEndpointKeys();
+	}, _lifetime);
+
+	_config->dcOptions().confirmedCustomEndpointProfileChanged(
+	) | rpl::on_next([=] {
+		updateActiveEndpointKeys();
+	}, _lifetime);
 
 	_proxySettings.connectionTypeChanges(
 	) | rpl::on_next([=] {
@@ -403,6 +428,10 @@ void Instance::Private::applyDomainIps(
 		const QString &host,
 		const QStringList &ips,
 		crl::time expireAt) {
+	if (isEndpointTestMode()) {
+		_instance->proxyDomainResolved(host, ips, expireAt);
+		return;
+	}
 	const auto applyToProxy = [&](ProxyData &proxy) {
 		if (!proxy.tryCustomResolve() || proxy.host != host) {
 			return false;
@@ -445,6 +474,9 @@ void Instance::Private::applyDomainIps(
 void Instance::Private::setGoodProxyDomain(
 		const QString &host,
 		const QString &ip) {
+	if (isEndpointTestMode()) {
+		return;
+	}
 	const auto applyToProxy = [&](ProxyData &proxy) {
 		if (!proxy.tryCustomResolve() || proxy.host != host) {
 			return false;
@@ -511,7 +543,7 @@ rpl::producer<DcId> Instance::Private::mainDcIdValue() const {
 }
 
 void Instance::Private::requestConfig() {
-	if (_configLoader || isKeysDestroyer()) {
+	if (_configLoader || !isNormal()) {
 		return;
 	}
 	_configLoader = std::make_unique<ConfigLoader>(
@@ -541,7 +573,9 @@ void Instance::Private::badConfigurationError() {
 }
 
 void Instance::Private::syncHttpUnixtime() {
-	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
+	if (isEndpointTestMode()
+		|| base::unixtime::http_valid()
+		|| _httpUnixtimeLoader) {
 		return;
 	}
 	_httpUnixtimeLoader = std::make_unique<SpecialConfigRequest>([=] {
@@ -590,7 +624,9 @@ void Instance::Private::requestConfigIfExpired() {
 }
 
 void Instance::Private::requestCDNConfig() {
-	if (_cdnConfigLoadRequestId || !hasMainDcId()) {
+	if (isEndpointTestMode()
+		|| _cdnConfigLoadRequestId
+		|| !hasMainDcId()) {
 		return;
 	}
 	_cdnConfigLoadRequestId = request(
@@ -809,6 +845,30 @@ not_null<Dcenter*> Instance::Private::getDcById(
 	return addDc(dcId);
 }
 
+void Instance::Private::updateActiveEndpointKeys() {
+	if (isKeysDestroyer()) {
+		return;
+	}
+	const auto nowCustom = _config->dcOptions().hasCustomEndpoint();
+	if (_isCustomEndpointActive == nowCustom) {
+		return;
+	}
+	_isCustomEndpointActive = nowCustom;
+	const auto &activeMap = _isCustomEndpointActive
+		? _customKeysForWrite
+		: _officialKeysForWrite;
+
+	_keysForWrite = activeMap;
+
+	for (const auto &[shiftedDcId, dc] : _dcenters) {
+		const auto bareId = BareDcId(shiftedDcId);
+		const auto it = activeMap.find(bareId);
+		const auto key = (it != activeMap.cend()) ? it->second : nullptr;
+		dc->setPersistentKey(key);
+	}
+	_writeKeysRequests.fire({});
+}
+
 void Instance::Private::dcPersistentKeyChanged(
 		DcId dcId,
 		const AuthKeyPtr &persistentKey) {
@@ -818,21 +878,20 @@ void Instance::Private::dcPersistentKeyChanged(
 		return;
 	}
 
-	const auto i = _keysForWrite.find(dcId);
-	if (i != _keysForWrite.end() && i->second == persistentKey) {
-		return;
-	} else if (i == _keysForWrite.end() && !persistentKey) {
-		return;
-	}
+	auto &targetMap = _isCustomEndpointActive
+		? _customKeysForWrite
+		: _officialKeysForWrite;
+
 	if (!persistentKey) {
-		_keysForWrite.erase(i);
-	} else if (i != _keysForWrite.end()) {
-		i->second = persistentKey;
+		targetMap.erase(dcId);
+		_keysForWrite.erase(dcId);
 	} else {
-		_keysForWrite.emplace(dcId, persistentKey);
+		targetMap[dcId] = persistentKey;
+		_keysForWrite[dcId] = persistentKey;
 	}
-	DEBUG_LOG(("AuthKey Info: writing auth keys, called by dc %1"
-		).arg(dcId));
+	DEBUG_LOG(("AuthKey Info: writing auth keys, called by dc %1, custom: %2"
+		).arg(dcId
+		).arg(_isCustomEndpointActive));
 	_writeKeysRequests.fire({});
 }
 
@@ -842,6 +901,16 @@ void Instance::Private::dcTemporaryKeyChanged(DcId dcId) {
 
 rpl::producer<DcId> Instance::Private::dcTemporaryKeyChanged() const {
 	return _dcTemporaryKeyChanged.events();
+}
+
+bool Instance::Private::mainDcHasBoundKeyPair() const {
+	const auto i = _dcenters.find(mainDcId());
+	if (i == _dcenters.end()) {
+		return false;
+	}
+	const auto dc = i->second.get();
+	return dc->getPersistentKey()
+		&& dc->getTemporaryKey(TemporaryKeyType::Regular);
 }
 
 AuthKeysList Instance::Private::getKeysForWrite() const {
@@ -899,6 +968,10 @@ Environment Instance::Private::environment() const {
 
 bool Instance::Private::isTestMode() const {
 	return _config->isTestMode();
+}
+
+bool Instance::Private::isEndpointTestMode() const {
+	return (_mode == Instance::Mode::EndpointTest);
 }
 
 QString Instance::Private::deviceModel() const {
@@ -1209,8 +1282,13 @@ void Instance::Private::processUpdate(const Response &message) {
 
 void Instance::Private::onStateChange(ShiftedDcId dcWithShift, int32 state) {
 	if (_stateChangedHandler) {
+		const auto guard = QPointer<Instance>(_instance);
 		_stateChangedHandler(dcWithShift, state);
+		if (!guard) {
+			return;
+		}
 	}
+	_connectionStateChanges.fire({ dcWithShift, state });
 }
 
 void Instance::Private::onSessionReset(ShiftedDcId dcWithShift) {
@@ -1378,6 +1456,9 @@ bool Instance::Private::exportFail(
 bool Instance::Private::onErrorDefault(
 		const Error &error,
 		const Response &response) {
+	if (isEndpointTestMode()) {
+		return false;
+	}
 	const auto requestId = response.requestId;
 	const auto &type = error.type();
 	const auto code = error.code();
@@ -1804,6 +1885,11 @@ void Instance::Private::setGlobalFailHandler(
 	_globalFailHandler = std::move(handler);
 }
 
+auto Instance::Private::connectionStateChanges() const
+-> rpl::producer<ConnectionState> {
+	return _connectionStateChanges.events();
+}
+
 void Instance::Private::setStateChangedHandler(
 		Fn<void(ShiftedDcId shiftedDcId, int32 state)> handler) {
 	_stateChangedHandler = std::move(handler);
@@ -1998,6 +2084,10 @@ rpl::producer<DcId> Instance::dcTemporaryKeyChanged() const {
 	return _private->dcTemporaryKeyChanged();
 }
 
+bool Instance::mainDcHasBoundKeyPair() const {
+	return _private->mainDcHasBoundKeyPair();
+}
+
 AuthKeysList Instance::getKeysForWrite() const {
 	return _private->getKeysForWrite();
 }
@@ -2026,6 +2116,10 @@ bool Instance::isTestMode() const {
 	return _private->isTestMode();
 }
 
+bool Instance::isEndpointTestMode() const {
+	return _private->isEndpointTestMode();
+}
+
 QString Instance::deviceModel() const {
 	return _private->deviceModel();
 }
@@ -2041,6 +2135,10 @@ void Instance::setUpdatesHandler(Fn<void(const Response&)> handler) {
 void Instance::setGlobalFailHandler(
 		Fn<void(const Error&, const Response&)> handler) {
 	_private->setGlobalFailHandler(std::move(handler));
+}
+
+rpl::producer<ConnectionState> Instance::connectionStateChanges() const {
+	return _private->connectionStateChanges();
 }
 
 void Instance::setStateChangedHandler(

@@ -7,14 +7,42 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtproto_config.h"
 
-#include "storage/serialize_common.h"
-#include "mtproto/type_utils.h"
 #include "logs.h"
+#include "mtproto/mtproto_custom_endpoint.h"
+#include "mtproto/type_utils.h"
+#include "storage/serialize_common.h"
 
 namespace MTP {
 namespace {
 
-constexpr auto kVersion = 1;
+constexpr auto kLegacyVersion = 1;
+constexpr auto kVersion = 2;
+
+[[nodiscard]] bool ReadCustomEndpointPayload(
+		QDataStream &stream,
+		QByteArray &payload) {
+	const auto device = stream.device();
+	if (!device || device->bytesAvailable() < int(sizeof(qint32))) {
+		return false;
+	}
+
+	auto size = qint32(0);
+	stream >> size;
+	if (stream.status() != QDataStream::Ok
+		|| size < 0
+		|| size > kCustomEndpointMaxPayloadSize
+		|| device->bytesAvailable() != size) {
+		return false;
+	}
+
+	payload.resize(size);
+	if (!size) {
+		return stream.atEnd();
+	}
+	return stream.readRawData(payload.data(), size) == size
+		&& stream.status() == QDataStream::Ok
+		&& stream.atEnd();
+}
 
 [[nodiscard]] QString ConfigDefaultReactionEmoji() {
 	static const auto result = QString::fromUtf8("\xf0\x9f\x91\x8d");
@@ -49,6 +77,11 @@ Config::Config(const Config &other)
 
 QByteArray Config::serialize() const {
 	auto options = _dcOptions.serialize();
+	auto customEndpointPayload = QByteArray();
+	if (const auto profile = _dcOptions.confirmedCustomEndpointProfile()) {
+		customEndpointPayload = SerializeCustomEndpointProfile(
+			*profile).payload;
+	}
 	auto size = sizeof(qint32) * 2 // version + environment
 		+ Serialize::bytearraySize(options)
 		+ 19 * sizeof(qint32)
@@ -60,7 +93,9 @@ QByteArray Config::serialize() const {
 		+ sizeof(quint64)
 		+ sizeof(qint32)
 		+ Serialize::stringSize(_fields.gifSearchUsername)
-		+ Serialize::stringSize(_fields.venueSearchUsername);
+		+ Serialize::stringSize(_fields.venueSearchUsername)
+		+ sizeof(qint32)
+		+ customEndpointPayload.size();
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -107,7 +142,13 @@ QByteArray Config::serialize() const {
 			<< quint64(_fields.reactionDefaultCustom)
 			<< qint32(_fields.ratingDecay)
 			<< _fields.gifSearchUsername
-			<< _fields.venueSearchUsername;
+			<< _fields.venueSearchUsername
+			<< qint32(customEndpointPayload.size());
+		if (!customEndpointPayload.isEmpty()) {
+			stream.writeRawData(
+				customEndpointPayload.constData(),
+				customEndpointPayload.size());
+		}
 	}
 	return result;
 }
@@ -121,7 +162,7 @@ std::unique_ptr<Config> Config::FromSerialized(const QByteArray &serialized) {
 
 	auto version = qint32();
 	stream >> version;
-	if (version != kVersion) {
+	if (version != kLegacyVersion && version != kVersion) {
 		return result;
 	}
 	auto environment = qint32();
@@ -199,14 +240,22 @@ std::unique_ptr<Config> Config::FromSerialized(const QByteArray &serialized) {
 	read(legacyPhoneCallsEnabled);
 	read(raw->_fields.blockedMode);
 	read(raw->_fields.captionLengthMax);
-	if (!stream.atEnd()) {
+	if (version == kLegacyVersion) {
+		if (!stream.atEnd()) {
+			read(raw->_fields.reactionDefaultEmoji);
+			read(raw->_fields.reactionDefaultCustom);
+		}
+		if (!stream.atEnd()) {
+			read(raw->_fields.ratingDecay);
+		}
+		if (!stream.atEnd()) {
+			read(raw->_fields.gifSearchUsername);
+			read(raw->_fields.venueSearchUsername);
+		}
+	} else {
 		read(raw->_fields.reactionDefaultEmoji);
 		read(raw->_fields.reactionDefaultCustom);
-	}
-	if (!stream.atEnd()) {
 		read(raw->_fields.ratingDecay);
-	}
-	if (!stream.atEnd()) {
 		read(raw->_fields.gifSearchUsername);
 		read(raw->_fields.venueSearchUsername);
 	}
@@ -214,6 +263,24 @@ std::unique_ptr<Config> Config::FromSerialized(const QByteArray &serialized) {
 	if (stream.status() != QDataStream::Ok
 		|| !raw->_dcOptions.constructFromSerialized(dcOptionsSerialized)) {
 		return nullptr;
+	}
+	if (version == kLegacyVersion) {
+		return result;
+	}
+
+	auto customEndpointPayload = QByteArray();
+	if (!ReadCustomEndpointPayload(stream, customEndpointPayload)
+		|| customEndpointPayload.isEmpty()) {
+		return result;
+	}
+	const auto customEndpoint = DeserializeCustomEndpointProfile(
+		customEndpointPayload);
+	if (!IsValidCustomEndpoint(customEndpoint.validation)) {
+		return result;
+	}
+	if (!raw->_dcOptions.setConfirmedCustomEndpointProfile(
+			customEndpoint.profile)) {
+		return result;
 	}
 	return result;
 }

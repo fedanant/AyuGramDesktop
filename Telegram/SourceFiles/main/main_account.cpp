@@ -438,7 +438,8 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	const auto writingConfig = _lifetime.make_state<bool>(false);
 	rpl::merge(
 		_mtp->config().updates(),
-		_mtp->dcOptions().changed() | rpl::to_empty
+		_mtp->dcOptions().changed() | rpl::to_empty,
+		_mtp->dcOptions().confirmedCustomEndpointProfileChanged()
 	) | rpl::filter([=] {
 		return !*writingConfig;
 	}) | rpl::on_next([=] {

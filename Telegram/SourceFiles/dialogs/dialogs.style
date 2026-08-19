@@ -515,6 +515,81 @@ dialogsLoadMoreLoading: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) 
 	size: size(12px, 12px);
 }
 
+unreadMentionsBoxWidth: 520px;
+unreadMentionsStatus: FlatLabel(defaultFlatLabel) {
+	minWidth: 64px;
+	align: align(top);
+	textFg: windowSubTextFg;
+}
+unreadMentionsStatusPadding: margins(20px, 12px, 20px, 4px);
+unreadMentionsFailure: FlatLabel(defaultFlatLabel) {
+	minWidth: 64px;
+	align: align(top);
+	textFg: attentionButtonFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(12px semibold);
+	}
+}
+unreadMentionsFailurePadding: margins(20px, 0px, 20px, 8px);
+unreadMentionsListHeight: 360px;
+unreadMentionsListPadding: margins(0px, 0px, 0px, 0px);
+unreadMentionsRowHeight: 78px;
+unreadMentionsRowBuffer: 156px;
+unreadMentionsRowPadding: margins(20px, 12px, 20px, 12px);
+unreadMentionsRowTitleTop: 10px;
+unreadMentionsRowMetaTop: 31px;
+unreadMentionsRowPreviewTop: 52px;
+unreadMentionsRowDateSkip: 12px;
+unreadMentionsRowTitleFont: font(14px semibold);
+unreadMentionsRowMetaFont: font(12px);
+unreadMentionsRowPreviewFont: normalFont;
+unreadMentionsRowDateFont: dialogsDateFont;
+unreadMentionsRowTitleFg: dialogsNameFg;
+unreadMentionsRowMetaFg: windowSubTextFg;
+unreadMentionsRowPreviewFg: dialogsTextFg;
+unreadMentionsRowDateFg: dialogsDateFg;
+unreadMentionsRowBg: boxBg;
+unreadMentionsRowBgOver: windowBgOver;
+unreadMentionsRowBgFocused: windowBgOver;
+unreadMentionsRowRipple: RippleAnimation(defaultRippleAnimation) {
+	color: dialogsRippleBg;
+}
+unreadMentionsRowFocusFg: attentionButtonFg;
+unreadMentionsRowFocusWidth: 2px;
+unreadMentionsRowFocusMargin: 2px;
+unreadMentionsRowFocusRadius: 8px;
+
+dialogsUnreadMentionsHeight: 44px;
+dialogsUnreadMentionsBg: windowBg;
+dialogsUnreadMentionsBgOver: windowBgOver;
+dialogsUnreadMentionsBgFocused: windowBgOver;
+dialogsUnreadMentionsFg: attentionButtonFg;
+dialogsUnreadMentionsFgOver: attentionButtonFgOver;
+dialogsUnreadMentionsIcon: icon{{ "info/info_notifications", attentionButtonFg }};
+dialogsUnreadMentionsIconOver: icon{{ "info/info_notifications", attentionButtonFgOver }};
+dialogsUnreadMentionsIconPosition: point(16px, 13px);
+dialogsUnreadMentionsRipple: RippleAnimation(defaultRippleAnimation) {
+	color: attentionButtonBgRipple;
+}
+dialogsUnreadMentionsFocusFg: attentionButtonFg;
+dialogsUnreadMentionsFocusWidth: 2px;
+dialogsUnreadMentionsFocusMargin: 2px;
+dialogsUnreadMentionsFocusRadius: 8px;
+dialogsUnreadMentionsSpinner: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+	color: attentionButtonFg;
+	thickness: 2px;
+	size: size(18px, 18px);
+}
+dialogsUnreadMentionsSpinnerPosition: point(16px, 13px);
+dialogsUnreadMentionsBadgeFont: font(12px bold);
+dialogsUnreadMentionsBadgeHeight: 20px;
+dialogsUnreadMentionsBadgeMinWidth: 20px;
+dialogsUnreadMentionsBadgePadding: 6px;
+dialogsUnreadMentionsBadgeRight: 16px;
+dialogsUnreadMentionsBadgeTop: 12px;
+dialogsUnreadMentionsBadgeBg: attentionButtonFg;
+dialogsUnreadMentionsBadgeFg: windowBg;
+
 dialogsSearchInHeight: 38px;
 dialogsSearchInPhotoSize: 28px;
 dialogsSearchInPhotoPadding: 10px;

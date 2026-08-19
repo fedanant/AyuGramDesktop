@@ -662,7 +662,9 @@ void DcKeyCreator::dhParamsAnswered(
 			DEBUG_LOG(("AuthKey Error: sha1 did not match, server_nonce: %1, new_nonce %2, encrypted data %3").arg(Logs::mb(&attempt->data.server_nonce, 16).str(), Logs::mb(&attempt->data.new_nonce, 16).str(), Logs::mb(encDHStr.constData(), encDHLen).str()));
 			return failed();
 		}
-		base::unixtime::update(dh_inner_data.vserver_time().v);
+		if (_request.allowTimeSync) {
+			base::unixtime::update(dh_inner_data.vserver_time().v);
+		}
 
 		// check that dhPrime and (dhPrime - 1) / 2 are really prime
 		if (!IsPrimeAndGood(bytes::make_span(dh_inner_data.vdh_prime().v), dh_inner_data.vg().v)) {

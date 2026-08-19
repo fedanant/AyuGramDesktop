@@ -28,6 +28,11 @@ using AuthKeyPtr = std::shared_ptr<AuthKey>;
 using AuthKeysList = std::vector<AuthKeyPtr>;
 enum class Environment : uchar;
 
+struct ConnectionState {
+	ShiftedDcId shiftedDcId = 0;
+	int32 state = 0;
+};
+
 class Instance : public QObject {
 	Q_OBJECT
 
@@ -53,6 +58,7 @@ public:
 	enum class Mode {
 		Normal,
 		KeysDestroyer,
+		EndpointTest,
 	};
 
 	Instance(Mode mode, Fields &&fields);
@@ -79,6 +85,7 @@ public:
 	[[nodiscard]] DcOptions &dcOptions() const;
 	[[nodiscard]] Environment environment() const;
 	[[nodiscard]] bool isTestMode() const;
+	[[nodiscard]] bool isEndpointTestMode() const;
 	[[nodiscard]] QString deviceModel() const;
 	[[nodiscard]] QString systemVersion() const;
 
@@ -86,6 +93,7 @@ public:
 	void dcPersistentKeyChanged(DcId dcId, const AuthKeyPtr &persistentKey);
 	void dcTemporaryKeyChanged(DcId dcId);
 	[[nodiscard]] rpl::producer<DcId> dcTemporaryKeyChanged() const;
+	[[nodiscard]] bool mainDcHasBoundKeyPair() const;
 	[[nodiscard]] AuthKeysList getKeysForWrite() const;
 	void addKeysForDestroy(AuthKeysList &&keys);
 
@@ -106,6 +114,7 @@ public:
 	void setUpdatesHandler(Fn<void(const Response&)> handler);
 	void setGlobalFailHandler(
 		Fn<void(const Error&, const Response&)> handler);
+	[[nodiscard]] rpl::producer<ConnectionState> connectionStateChanges() const;
 	void setStateChangedHandler(
 		Fn<void(ShiftedDcId shiftedDcId, int32 state)> handler);
 	void setSessionResetHandler(Fn<void(ShiftedDcId shiftedDcId)> handler);

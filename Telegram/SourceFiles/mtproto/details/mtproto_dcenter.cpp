@@ -71,6 +71,15 @@ AuthKeyPtr Dcenter::getPersistentKey() const {
 	return _persistentKey;
 }
 
+void Dcenter::setPersistentKey(AuthKeyPtr key) {
+	QWriteLocker lock(&_mutex);
+	_persistentKey = std::move(key);
+	for (auto &temp : _temporaryKeys) {
+		temp = nullptr;
+	}
+	_connectionInited = false;
+}
+
 bool Dcenter::destroyTemporaryKey(uint64 keyId) {
 	QWriteLocker lock(&_mutex);
 	for (auto &key : _temporaryKeys) {

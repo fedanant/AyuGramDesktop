@@ -6,29 +6,35 @@
 // Copyright @Radolyn, 2026
 #include "ayu/ui/settings/settings_other.h"
 
-#include "lang_auto.h"
-#include "ayu/ayu_settings.h"
+#include "ayu/ui/boxes/custom_endpoint_box.h"
 #include "ayu/ui/boxes/donate_qr_box.h"
 #include "ayu/ui/settings/ayu_builder.h"
 #include "ayu/ui/settings/settings_ayu_utils.h"
 #include "ayu/ui/settings/settings_main.h"
+#include "ayu/ayu_settings.h"
 #include "boxes/abstract_box.h"
 #include "core/application.h"
 #include "lang/lang_text_entity.h"
+#include "lang_auto.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
+#include "mtproto/mtp_instance.h"
+#include "mtproto/mtproto_dc_options.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common.h"
-#include "styles/style_menu_icons.h"
-#include "styles/style_settings.h"
-#include "ui/integration.h"
-#include "ui/painter.h"
-#include "ui/rect.h"
-#include "ui/vertical_list.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/vertical_layout.h"
-#include "window/window_session_controller.h"
+#include "ui/integration.h"
+#include "ui/painter.h"
+#include "ui/rect.h"
+#include "ui/vertical_list.h"
 #include "window/themes/window_theme.h"
+#include "window/window_session_controller.h"
+
+#include "styles/style_menu_icons.h"
+#include "styles/style_settings.h"
 
 #include <QDesktopServices>
 #include <QGuiApplication>
@@ -40,6 +46,24 @@ using namespace Builder;
 using namespace AyuBuilder;
 
 namespace {
+
+[[nodiscard]] auto ConfirmedEndpointSummary(
+		not_null<Main::Account*> account)
+-> rpl::producer<QString> {
+	const auto options = &account->mtp().dcOptions();
+	return (rpl::single() | rpl::then(
+		options->confirmedCustomEndpointProfileChanged()
+	)) | rpl::map([=] {
+		const auto profile = options->confirmedCustomEndpointProfile();
+		if (!profile) {
+			return tr::ayu_custom_endpoints_summary_default();
+		}
+		return tr::ayu_custom_endpoints_summary_custom(
+			lt_count,
+			rpl::single(float64(profile->endpoints.size()))
+				| tr::to_count());
+	}) | rpl::flatten_latest();
+}
 
 struct Asset {
 	QString icon;
@@ -195,8 +219,27 @@ void BuildCrashReporting(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 
 void BuildOtherThings(SectionBuilder &builder) {
 	const auto controller = builder.controller();
+	const auto account = &builder.session()->account();
 
 	builder.addSkip();
+	builder.addButton({
+		.id = u"ayu/customEndpoints"_q,
+		.title = tr::ayu_custom_endpoints_settings_title(),
+		.icon = { &st::menuIconNetwork },
+		.label = ConfirmedEndpointSummary(account),
+		.onClick = [=] {
+			Ayu::ShowCustomEndpointBox(
+				controller->uiShow(),
+				&controller->session().account());
+		},
+		.keywords = {
+			u"endpoint"_q,
+			u"endpoints"_q,
+			u"network"_q,
+			u"MTProto"_q,
+			u"server"_q,
+		},
+	});
 	builder.addButton({
 		.id = u"ayu/registerUrlScheme"_q,
 		.title = tr::ayu_RegisterURLScheme(),
