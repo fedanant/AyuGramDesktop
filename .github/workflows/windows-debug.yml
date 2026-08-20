@@ -1,13 +1,17 @@
-name: Windows Debug
+name: Windows Debug Release
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - 'codex/**'
+      - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: windows-debug-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -49,3 +53,22 @@ jobs:
           name: AyuGram-Windows-Debug
           path: out/Debug/AyuGram.exe
           if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "server-deeplink-${{ github.run_number }}"
+          $asset = "out/Debug/AyuGram.exe#AyuGram.exe"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --clobber --repo "${{ github.repository }}"
+          } else {
+            gh release create $tag $asset `
+              --repo "${{ github.repository }}" `
+              --target "${{ github.sha }}" `
+              --title "AyuGram server deeplink (${{ github.run_number }})" `
+              --notes "Debug-сборка AyuGram с поддержкой tg://server deeplink. Commit: ${{ github.sha }}" `
+              --prerelease
+          }
