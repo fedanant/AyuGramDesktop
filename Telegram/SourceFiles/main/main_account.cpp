@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
+#include "mtproto/mtproto_custom_endpoint.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
 #include "ui/ui_utility.h"
@@ -606,6 +607,32 @@ void Account::destroyStaleAuthorizationKeys() {
 			return;
 		}
 	}
+}
+
+bool Account::applyCustomEndpointProfileForLogin(
+		const MTP::CustomEndpointProfile &profile) {
+	if (!_mtp
+		|| sessionExists()
+		|| profile.environment != _mtp->environment()) {
+		return false;
+	}
+
+	auto config = std::make_unique<MTP::Config>(_mtp->config());
+	if (!config->dcOptions().setConfirmedCustomEndpointProfile(profile)) {
+		return false;
+	}
+
+	_mtpForKeysDestroy = nullptr;
+	_mtpKeysToDestroy.clear();
+	_mtpFields.keys.clear();
+	_mtpFields.mainDcId = 1;
+	{
+		const auto old = base::take(_mtp);
+		startMtp(std::move(config));
+	}
+	local().writeMtpData();
+	local().writeMtpConfig();
+	return true;
 }
 
 void Account::setHandleLoginCode(Fn<void(QString)> callback) {

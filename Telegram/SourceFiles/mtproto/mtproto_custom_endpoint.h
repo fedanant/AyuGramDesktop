@@ -119,6 +119,10 @@ struct CustomEndpointPayloadResult {
 [[nodiscard]] CustomEndpointProfileResult ParseCustomEndpointProfile(
 	QStringView text,
 	Environment environment);
+[[nodiscard]] CustomEndpointProfileResult ParseCustomEndpointLinkProfile(
+	QStringView servers,
+	QStringView publicKeyBase64,
+	Environment environment);
 [[nodiscard]] QString FormatCustomEndpointProfile(
 	const CustomEndpointProfile &profile);
 [[nodiscard]] CustomEndpointPayloadResult SerializeCustomEndpointProfile(

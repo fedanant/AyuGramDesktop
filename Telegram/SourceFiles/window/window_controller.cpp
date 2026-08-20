@@ -146,9 +146,23 @@ void Controller::showAccount(not_null<Main::Account*> account) {
 	showAccount(account, ShowAtUnreadMsgId);
 }
 
+void Controller::showPhoneLogin(not_null<Main::Account*> account) {
+	showAccount(
+		account,
+		ShowAtUnreadMsgId,
+		Intro::EnterPoint::Phone);
+}
+
 void Controller::showAccount(
 		not_null<Main::Account*> account,
 		MsgId singlePeerShowAtMsgId) {
+	showAccount(account, singlePeerShowAtMsgId, Intro::EnterPoint::Qr);
+}
+
+void Controller::showAccount(
+		not_null<Main::Account*> account,
+		MsgId singlePeerShowAtMsgId,
+		Intro::EnterPoint introPoint) {
 	Expects(isPrimary() || _id.account == account);
 
 	const auto prevSession = maybeSession();
@@ -223,7 +237,7 @@ void Controller::showAccount(
 			session->updates().updateOnline(crl::now());
 		} else {
 			sideBarChanged();
-			setupIntro(std::move(oldContentCache));
+			setupIntro(introPoint, std::move(oldContentCache));
 			_widget.updateGlobalMenu();
 		}
 
@@ -400,8 +414,10 @@ void Controller::clearSetupEmailLock() {
 	_widget.clearSetupEmailLock();
 }
 
-void Controller::setupIntro(QPixmap oldContentCache) {
-	_widget.setupIntro(Intro::EnterPoint::Qr, std::move(oldContentCache));
+void Controller::setupIntro(
+		Intro::EnterPoint point,
+		QPixmap oldContentCache) {
+	_widget.setupIntro(point, std::move(oldContentCache));
 }
 
 void Controller::setupMain(

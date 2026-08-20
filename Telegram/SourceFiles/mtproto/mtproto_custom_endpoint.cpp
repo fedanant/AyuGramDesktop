@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QRegularExpression>
 #include <QtNetwork/QHostAddress>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 
@@ -216,6 +217,94 @@ using Flags = MTPDdcOption::Flags;
 		const std::vector<int> *sourceLines,
 		int row) {
 	return sourceLines ? (*sourceLines)[row - 1] : row;
+}
+
+struct LinkServer {
+	Flags flags;
+	std::string ip;
+	int port = 0;
+};
+
+[[nodiscard]] std::optional<LinkServer> ParseLinkServer(
+		QStringView value) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return std::nullopt;
+	}
+
+	auto addressText = QStringView();
+	auto portText = QStringView();
+	if (value.startsWith(u'[')) {
+		const auto closing = value.indexOf(u']');
+		if (closing <= 1
+			|| closing + 1 >= value.size()
+			|| value[closing + 1] != u':'
+			|| value.indexOf(u']', closing + 1) >= 0) {
+			return std::nullopt;
+		}
+		addressText = value.mid(1, closing - 1);
+		portText = value.mid(closing + 2);
+	} else {
+		const auto separator = value.lastIndexOf(u':');
+		if (separator <= 0
+			|| separator + 1 >= value.size()
+			|| value.left(separator).contains(u':')) {
+			return std::nullopt;
+		}
+		addressText = value.left(separator);
+		portText = value.mid(separator + 1);
+	}
+
+	auto address = QHostAddress();
+	if (!address.setAddress(addressText.toString())
+		|| !address.scopeId().isEmpty()
+		|| !IsAsciiDecimal(portText)) {
+		return std::nullopt;
+	}
+	auto portOk = false;
+	const auto port = portText.toInt(&portOk);
+	if (!portOk || port < 1 || port > 65535) {
+		return std::nullopt;
+	}
+
+	auto flags = Flags();
+	if (address.protocol() == QAbstractSocket::IPv6Protocol) {
+		flags |= Flag::f_ipv6;
+	}
+	return LinkServer{
+		flags,
+		address.toString().toStdString(),
+		port,
+	};
+}
+
+[[nodiscard]] std::optional<QByteArray> DecodePublicKeyBase64(
+		QStringView value) {
+	value = value.trimmed();
+	if (value.isEmpty()
+		|| value.toUtf8().size() > kCustomEndpointMaxTextSize) {
+		return std::nullopt;
+	}
+	const auto encoded = value.toLatin1();
+	if (QString::fromLatin1(encoded) != value.toString()) {
+		return std::nullopt;
+	}
+	const auto decode = [&](QByteArray::Base64Option encoding) {
+		return QByteArray::fromBase64Encoding(
+			encoded,
+			encoding | QByteArray::AbortOnBase64DecodingErrors);
+	};
+	if (const auto standard = decode(QByteArray::Base64Encoding)) {
+		if (!(*standard).isEmpty()) {
+			return *standard;
+		}
+	}
+	if (const auto url = decode(QByteArray::Base64UrlEncoding)) {
+		if (!(*url).isEmpty()) {
+			return *url;
+		}
+	}
+	return std::nullopt;
 }
 
 [[nodiscard]] CustomEndpointValidation Validate(
@@ -591,6 +680,64 @@ CustomEndpointProfileResult ParseCustomEndpointProfile(
 		sourceLines.push_back(line);
 	}
 	result.validation = Validate(result.profile, &sourceLines);
+	return result;
+}
+
+CustomEndpointProfileResult ParseCustomEndpointLinkProfile(
+		QStringView servers,
+		QStringView publicKeyBase64,
+		Environment environment) {
+	auto result = CustomEndpointProfileResult();
+	result.profile.environment = environment;
+	if (servers.toUtf8().size() > kCustomEndpointMaxTextSize) {
+		result.validation = Error(CustomEndpointError::TextTooLong);
+		return result;
+	}
+
+	const auto parts = servers.toString().split(u',', Qt::KeepEmptyParts);
+	const auto dcCount = ExpectedDcCount(environment);
+	if (parts.empty()) {
+		result.validation = Error(CustomEndpointError::EmptyProfile);
+		return result;
+	} else if (!dcCount) {
+		result.validation = Error(CustomEndpointError::UnsupportedEnvironment);
+		return result;
+	} else if (parts.size() * dcCount > kCustomEndpointMaxRows) {
+		result.validation = Error(CustomEndpointError::TooManyRows);
+		return result;
+	}
+
+	auto parsed = std::vector<LinkServer>();
+	parsed.reserve(parts.size());
+	for (auto index = 0; index != parts.size(); ++index) {
+		const auto server = ParseLinkServer(parts[index]);
+		if (!server) {
+			result.validation = Error(
+				CustomEndpointError::InvalidRow,
+				index + 1,
+				index + 1);
+			return result;
+		}
+		parsed.push_back(*server);
+	}
+	for (auto dcId = DcId(1); dcId <= dcCount; ++dcId) {
+		for (const auto &server : parsed) {
+			result.profile.endpoints.push_back({
+				dcId,
+				server.flags,
+				server.ip,
+				server.port,
+			});
+		}
+	}
+
+	const auto publicKeyPem = DecodePublicKeyBase64(publicKeyBase64);
+	if (!publicKeyPem) {
+		result.validation = Error(CustomEndpointError::MalformedPublicKey);
+		return result;
+	}
+	result.profile.publicKeyPem = *publicKeyPem;
+	result.validation = Validate(result.profile, nullptr);
 	return result;
 }
 

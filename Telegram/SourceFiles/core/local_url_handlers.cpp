@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "media/player/media_player_instance.h"
 #include "media/view/media_view_open_common.h"
+#include "mtproto/mtproto_custom_endpoint.h"
+#include "mtproto/mtproto_dc_options.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
 #include "window/window_controller.h"
@@ -365,6 +367,122 @@ bool ConfirmPhone(
 		phone,
 		hash);
 	controller->window().activate();
+	return true;
+}
+
+[[nodiscard]] QString CustomEndpointFingerprint(uint64 fingerprint) {
+	return u"0x%1"_q.arg(
+		QString::number(fingerprint, 16).rightJustified(16, u'0'));
+}
+
+[[nodiscard]] QString CustomEndpointServers(
+		const MTP::CustomEndpointProfile &profile) {
+	auto result = QStringList();
+	for (const auto &endpoint : profile.endpoints) {
+		if (endpoint.dcId != 1) {
+			continue;
+		}
+		auto ip = QString::fromStdString(endpoint.ip);
+		if (endpoint.flags & MTPDdcOption::Flag::f_ipv6) {
+			ip = u'[' + ip + u']';
+		}
+		result.push_back(ip + u':' + QString::number(endpoint.port));
+	}
+	return result.join(u", "_q);
+}
+
+[[nodiscard]] Main::Account *CustomEndpointLoginAccount() {
+	auto &domain = Core::App().domain();
+	const auto suitable = [](not_null<Main::Account*> account) {
+		return !account->sessionExists()
+			&& account->mtp().environment()
+				== MTP::Environment::Production;
+	};
+	if (const auto active = &domain.active(); suitable(active)) {
+		return active;
+	}
+	for (const auto account : domain.orderedAccounts()) {
+		if (suitable(account)) {
+			return account;
+		}
+	}
+	return (domain.accounts().size() < domain.maxAccounts())
+		? domain.add(MTP::Environment::Production).get()
+		: nullptr;
+}
+
+void ApplyCustomEndpointLink(MTP::CustomEndpointProfile profile) {
+	const auto account = CustomEndpointLoginAccount();
+	if (!account || !account->applyCustomEndpointProfileForLogin(profile)) {
+		if (const auto window = Core::App().activePrimaryWindow()) {
+			window->showToast(tr::ayu_server_link_apply_failed(tr::now));
+		}
+		return;
+	}
+
+	Core::App().domain().activate(account);
+	if (const auto window = Core::App().activePrimaryWindow()) {
+		window->showPhoneLogin(account);
+		window->activate();
+	}
+}
+
+bool ApplyCustomEndpointFromLink(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	const auto window = controller
+		? &controller->window()
+		: Core::App().activePrimaryWindow();
+	if (!window) {
+		return false;
+	}
+
+	const auto params = url_parse_params(
+		match->captured(1),
+		qthelp::UrlParamNameTransform::ToLower);
+	const auto parsed = MTP::ParseCustomEndpointLinkProfile(
+		params.value(u"server"_q),
+		params.value(u"rsa"_q),
+		MTP::Environment::Production);
+	if (!MTP::IsValidCustomEndpoint(parsed.validation)) {
+		window->showToast(tr::ayu_server_link_invalid(tr::now));
+		return true;
+	}
+	const auto publicKey = MTP::ValidateCustomEndpointPublicKey(
+		parsed.profile.publicKeyPem);
+	if (!MTP::IsValidCustomEndpoint(publicKey.validation)) {
+		window->showToast(tr::ayu_server_link_invalid(tr::now));
+		return true;
+	}
+
+	const auto servers = CustomEndpointServers(parsed.profile);
+	const auto fingerprint = CustomEndpointFingerprint(
+		publicKey.fingerprint);
+	const auto text = parsed.validation.requiresLocalNetworkConfirmation
+		? tr::ayu_server_link_confirmation_local(
+			tr::now,
+			lt_server,
+			tr::bold(servers),
+			lt_fingerprint,
+			tr::bold(fingerprint),
+			tr::rich)
+		: tr::ayu_server_link_confirmation(
+			tr::now,
+			lt_server,
+			tr::bold(servers),
+			lt_fingerprint,
+			tr::bold(fingerprint),
+			tr::rich);
+	window->show(Ui::MakeConfirmBox({
+		.text = text,
+		.confirmed = [profile = parsed.profile](Fn<void()> close) mutable {
+			close();
+			ApplyCustomEndpointLink(std::move(profile));
+		},
+		.confirmText = tr::ayu_server_link_connect(),
+		.title = tr::ayu_server_link_title(),
+	}));
 	return true;
 }
 
@@ -1675,6 +1793,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		{
 			u"^confirmphone/?\\?(.+)(#|$)"_q,
 			ConfirmPhone
+		},
+		{
+			u"^server/?\\?(.+)(#|$)"_q,
+			ApplyCustomEndpointFromLink
 		},
 		{
 			u"^socks/?\\?(.+)(#|$)"_q,

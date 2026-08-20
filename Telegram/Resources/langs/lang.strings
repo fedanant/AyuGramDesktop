@@ -8483,6 +8483,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_custom_endpoints_local_warning_title" = "Test local-network endpoints?";
 "ayu_custom_endpoints_local_warning" = "This profile includes **private, loopback, or link-local addresses**. Continue only if you deliberately trust and control that local network endpoint.";
 "ayu_custom_endpoints_local_proceed" = "Test local endpoints";
+"ayu_server_link_title" = "Connect to third-party server?";
+"ayu_server_link_confirmation" = "Connect a new AyuGram account to {server}?\n\nMTProto RSA fingerprint: {fingerprint}\n\nThe server operator can see your IP address and handle all traffic for this account. Continue only if you trust it.";
+"ayu_server_link_confirmation_local" = "Connect a new AyuGram account to {server}?\n\nMTProto RSA fingerprint: {fingerprint}\n\nThis link includes a private, loopback, or link-local address. The server operator can see your IP address and handle all traffic for this account. Continue only if you trust and control this endpoint.";
+"ayu_server_link_connect" = "Connect";
+"ayu_server_link_invalid" = "This server link is invalid. Check server=ip:port,... and the base64 RSA public key.";
+"ayu_server_link_apply_failed" = "AyuGram could not prepare an account for this server.";
 
 "ayu_tg_ws_proxy_option" = "Use tg-ws-proxy (Cloudflare)";
 "ayu_tg_ws_proxy_main_description" = "AyuGram runs a local MTProto WebSocket bridge and routes Telegram through it.";

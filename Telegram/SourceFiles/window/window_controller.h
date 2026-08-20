@@ -48,6 +48,7 @@ public:
 	Controller &operator=(const Controller &other) = delete;
 
 	void showAccount(not_null<Main::Account*> account);
+	void showPhoneLogin(not_null<Main::Account*> account);
 	[[nodiscard]] SeparateId id() const;
 	[[nodiscard]] bool isPrimary() const;
 
@@ -163,12 +164,18 @@ private:
 	};
 	explicit Controller(CreateArgs &&args);
 
-	void setupIntro(QPixmap oldContentCache);
+	void setupIntro(
+		Intro::EnterPoint point,
+		QPixmap oldContentCache);
 	void setupMain(MsgId singlePeerShowAtMsgId, QPixmap oldContentCache);
 
 	void showAccount(
 		not_null<Main::Account*> account,
 		MsgId singlePeerShowAtMsgId);
+	void showAccount(
+		not_null<Main::Account*> account,
+		MsgId singlePeerShowAtMsgId,
+		Intro::EnterPoint introPoint);
 	void setupSideBar();
 	void sideBarChanged();
 
