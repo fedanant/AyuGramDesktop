@@ -2,6 +2,9 @@ name: Windows Debug
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - 'codex/**'
 
 permissions:
   contents: read
