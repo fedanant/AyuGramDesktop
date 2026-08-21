@@ -470,9 +470,9 @@ win:
         make ^
         mingw-w64-x86_64-diffutils ^
         mingw-w64-x86_64-gperf ^
-        mingw-w64-x86_64-nasm ^
         mingw-w64-x86_64-perl ^
         mingw-w64-x86_64-pkgconf
+    pacman -U --noconfirm https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-nasm-2.16.03-1-any.pkg.tar.zst
 """, 'ThirdParty')
 
 stage('python', """
@@ -1061,8 +1061,6 @@ winarm:
     SET "TOOLCHAIN=arm64-win64-vs17"
 win:
 depends:patches/build_libvpx_win.sh
-    SET "NUMBER_OF_PROCESSORS=1"
-    sed -i "s/ -m -t:Build/ -t:Build/" build/make/gen_msvs_sln.sh
     bash --login ../patches/build_libvpx_win.sh
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
