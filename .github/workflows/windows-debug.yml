@@ -36,7 +36,7 @@ jobs:
 
       - name: Prepare libraries
         shell: cmd
-        run: Telegram\build\prepare\win.bat
+        run: Telegram\build\prepare\win.bat skip-release
 
       - name: Configure Debug build
         shell: cmd

@@ -1061,6 +1061,7 @@ winarm:
     SET "TOOLCHAIN=arm64-win64-vs17"
 win:
 depends:patches/build_libvpx_win.sh
+    SET "NUMBER_OF_PROCESSORS=1"
     bash --login ../patches/build_libvpx_win.sh
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
