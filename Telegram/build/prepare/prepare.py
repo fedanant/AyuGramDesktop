@@ -1062,6 +1062,7 @@ winarm:
 win:
 depends:patches/build_libvpx_win.sh
     SET "NUMBER_OF_PROCESSORS=1"
+    sed -i "s/ -m -t:Build/ -t:Build/" build/make/gen_msvs_sln.sh
     bash --login ../patches/build_libvpx_win.sh
 mac:
     find ../patches/libvpx -type f -print0 | sort -z | xargs -0 git apply
