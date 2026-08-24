@@ -33,7 +33,7 @@ private func duplicatedCString(_ value: String) -> UnsafePointer<CChar>? {
 \treturn UnsafePointer(duplicated)
 }
 
-#if compiler(>=6.2) && canImport(Translation)
+#if canImport(Translation)
 @available(macOS 15.0, *)
 private func requestTranslation(
 \t\t_ text: String,
@@ -57,12 +57,9 @@ private func requestTranslation(
 \t@unknown default:
 \t\tthrow TranslationError.unsupportedLanguagePairing
 \t}
-\tif #available(macOS 26.0, *) {
-\t\tlet session = TranslationSession(installedSource: source, target: target)
-\t\tlet response = try await session.translate(text)
-\t\treturn response.targetText
-\t}
-\tthrow TranslationError.unsupportedLanguagePairing
+\tlet session = TranslationSession(installedSource: source, target: target)
+\tlet response = try await session.translate(text)
+\treturn response.targetText
 }
 
 @available(macOS 15.0, *)
@@ -70,7 +67,7 @@ private func translateErrorCode(_ error: Error) -> String {
 \tguard let translationError = error as? TranslationError else {
 \t\treturn "unknown"
 \t}
-\tif #available(macOS 26.0, *), case .notInstalled = translationError {
+\tif case .notInstalled = translationError {
 \t\treturn "local-language-pack-missing"
 \t}
 \tswitch translationError {
@@ -84,8 +81,8 @@ private func translateErrorCode(_ error: Error) -> String {
 
 @_cdecl("TranslateProviderMacSwiftIsAvailable")
 func TranslateProviderMacSwiftIsAvailable() -> Bool {
-#if compiler(>=6.2) && canImport(Translation)
-\tif #available(macOS 26.0, *) {
+#if canImport(Translation)
+\tif #available(macOS 15.0, *) {
 \t\treturn true
 \t}
 #endif
@@ -114,8 +111,8 @@ func TranslateProviderMacSwiftTranslate(
 \t\tTask.detached(priority: .utility) {
 \t\t\tlet callback = callbackFunction.value
 \t\t\tlet context = callbackContext.value
-#if compiler(>=6.2) && canImport(Translation)
-\t\t\tif #available(macOS 26.0, *) {
+#if canImport(Translation)
+\t\t\tif #available(macOS 15.0, *) {
 \t\t\t\tdo {
 \t\t\t\t\tlet translated = try await requestTranslation(
 \t\t\t\t\t\tsourceText,
