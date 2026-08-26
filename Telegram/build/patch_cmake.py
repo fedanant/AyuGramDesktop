@@ -19,7 +19,7 @@ def main():
     variables = os.path.join(root, 'cmake', 'variables.cmake')
     
     if os.path.exists(options_win):
-        patch_file(options_win, '/MP     # Enable multi process build.', '/MP     # Enable multi process build.\n        /FS')
+        patch_file(options_win, '/MP     # Enable multi process build.', '/MP     # Enable multi process build.\n        /FS\n        /Zm200')
         patch_file(options_win, '$<IF:$<STREQUAL:$<GENEX_EVAL:$<TARGET_PROPERTY:MSVC_DEBUG_INFORMATION_FORMAT>>,ProgramDatabase>,/DEBUG,/DEBUG:NONE>', '$<IF:$<BOOL:$<GENEX_EVAL:$<TARGET_PROPERTY:MSVC_DEBUG_INFORMATION_FORMAT>>>,/DEBUG,/DEBUG:NONE>')
     
     if os.path.exists(variables):

@@ -51,6 +51,13 @@ jobs:
         with:
           arch: x64
 
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "C:"
+
       - name: Prepare libraries
         shell: cmd
         run: Telegram\build\prepare\win.bat
