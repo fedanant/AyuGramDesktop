@@ -25,5 +25,9 @@ def main():
     if os.path.exists(variables):
         patch_file(variables, 'set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase" CACHE STRING "")', 'set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT\n    "$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>$<$<CONFIG:Release,MinSizeRel>:Embedded>"\n    CACHE STRING "" FORCE)')
 
+    run_cmake = os.path.join(root, 'cmake', 'run_cmake.py')
+    if os.path.exists(run_cmake):
+        patch_file(run_cmake, "'-T v143'", "'-T v143,host=x64'")
+
 if __name__ == '__main__':
     main()
