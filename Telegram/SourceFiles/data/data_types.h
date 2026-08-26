@@ -401,14 +401,6 @@ struct ForwardDraft {
 };
 
 struct ResolvedForwardDraft {
-	ResolvedForwardDraft() = default;
-	ResolvedForwardDraft(
-		HistoryItemsList items,
-		ForwardOptions options = ForwardOptions::PreserveInfo)
-	: items(std::move(items))
-	, options(options) {
-	}
-
 	HistoryItemsList items;
 	ForwardOptions options = ForwardOptions::PreserveInfo;
 };
