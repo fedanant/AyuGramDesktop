@@ -1761,7 +1761,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					&history->owner().session(),
 					Api::SendAction(thread, options),
 					false,
-					Data::ResolvedForwardDraft(items, forwardOptions));
+					Data::ResolvedForwardDraft{ items, forwardOptions });
 				}
 			});
 
@@ -1774,7 +1774,7 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 					AyuForward::intelligentForward(
 						&history->owner().session(),
 						Api::SendAction(thread, options),
-						Data::ResolvedForwardDraft(items, forwardOptions));
+						Data::ResolvedForwardDraft{ items, forwardOptions });
 				}
 			});
 

@@ -154,7 +154,7 @@ void forwardMessagesSync(not_null<Main::Session*> session,
 
 	crl::on_main([=]
 	{
-		session->api().forwardMessages(Data::ResolvedForwardDraft(items, options),
+		session->api().forwardMessages(Data::ResolvedForwardDraft{ items, options },
 									   action,
 									   [=]
 									   {

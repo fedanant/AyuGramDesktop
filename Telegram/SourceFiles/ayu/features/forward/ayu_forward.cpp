@@ -290,7 +290,7 @@ void intelligentForward(
 
 	for (const auto &chunk : chunks) {
 		if (chunk.isAyuForwardNeeded) {
-			forwardMessages(session, action, true, Data::ResolvedForwardDraft(chunk.items));
+			forwardMessages(session, action, true, Data::ResolvedForwardDraft{ chunk.items });
 		} else {
 			state->totalMessages = chunk.items.size();
 			state->sentMessages = 0;
