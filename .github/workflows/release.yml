@@ -24,7 +24,7 @@ permissions:
 
 concurrency:
   group: release-build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-windows:
@@ -123,11 +123,11 @@ jobs:
 
       - name: Configure Release build
         run: |
-          ./Telegram/configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+          ./Telegram/configure.sh -G Ninja -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_BUILD_TYPE=Release
 
       - name: Build AyuGram
         run: |
-          cmake --build out --config Release --target Telegram
+          cmake --build out --config Release --target Telegram -- -j2
 
       - name: Package macOS DMG
         run: |
