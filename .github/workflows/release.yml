@@ -123,11 +123,11 @@ jobs:
 
       - name: Configure Release build
         run: |
-          ./Telegram/configure.sh -G Ninja -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_BUILD_TYPE=Release
+          ./Telegram/configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
 
       - name: Build AyuGram
         run: |
-          cmake --build out --config Release --target Telegram -- -j2
+          cmake --build out --config Release --target Telegram -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
       - name: Package macOS DMG
         run: |
