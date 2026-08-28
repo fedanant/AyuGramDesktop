@@ -1476,7 +1476,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		if (!content->hasResult()) {
 			return;
 		}
-		args.apply(TextWithEntities{ .text = content->result() });
+		args.apply(TextWithEntities{ content->result() });
 		box->closeBox();
 	};
 	const auto sendResult = [=](Api::SendOptions options) {
@@ -1484,7 +1484,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 			return;
 		}
 		args.send(
-			TextWithEntities{ .text = content->result() },
+			TextWithEntities{ content->result() },
 			options,
 			crl::guard(box, [=] {
 				box->closeBox();

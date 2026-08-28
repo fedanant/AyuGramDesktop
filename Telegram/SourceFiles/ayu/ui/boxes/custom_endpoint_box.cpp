@@ -466,7 +466,7 @@ CustomEndpointEditor::~CustomEndpointEditor() {
 auto CustomEndpointEditor::publicKeyDescription()
 -> rpl::producer<TextWithEntities> {
 	const auto weak = base::make_weak(this);
-	return _modeChanged.events_starting_with({}) | rpl::map([weak] {
+	return _modeChanged.events_starting_with({}) | rpl::map([weak] -> rpl::producer<TextWithEntities> {
 		const auto strong = weak.get();
 		return strong
 			? PublicKeyDescription(strong->_inputMode)
@@ -480,7 +480,7 @@ auto CustomEndpointEditor::publicKeyFeedback()
 	return rpl::merge(
 		_modeChanged.events_starting_with({}),
 		_publicKeyChanged.events()
-	) | rpl::map([weak] {
+	) | rpl::map([weak] -> rpl::producer<TextWithEntities> {
 		const auto strong = weak.get();
 		if (!strong || !strong->_publicKeyField) {
 			return rpl::single(tr::marked());
