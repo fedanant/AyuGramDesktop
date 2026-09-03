@@ -30,6 +30,10 @@ namespace AyuForward {
 
 std::unordered_map<PeerId, std::shared_ptr<ForwardState>> forwardStates;
 
+ForwardState::ForwardState(int chunks)
+: totalChunks(chunks) {
+}
+
 bool isForwarding(const PeerId &id) {
 	const auto fwState = forwardStates.find(id);
 	if (id.value && fwState != forwardStates.end()) {

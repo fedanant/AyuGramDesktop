@@ -17,6 +17,8 @@ std::pair<QString, QString> stateName(const PeerId &id);
 class ForwardState
 {
 public:
+	explicit ForwardState(int chunks);
+
 	enum class State
 	{
 		Preparing,
@@ -26,10 +28,10 @@ public:
 	};
 	void updateBottomBar(const Main::Session &session, const PeerId *peer, const State &st);
 
-	int totalChunks;
-	int currentChunk;
-	int totalMessages;
-	int sentMessages;
+	int totalChunks = 0;
+	int currentChunk = 0;
+	int totalMessages = 0;
+	int sentMessages = 0;
 
 	State state = State::Preparing;
 	bool stopRequested = false;
