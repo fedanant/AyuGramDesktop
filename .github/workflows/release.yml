@@ -58,8 +58,9 @@ jobs:
           maximum-size: 32GB
           disk-root: "C:"
 
-      - name: Cache Windows Libraries & ThirdParty
-        uses: actions/cache@v4
+      - name: Restore Windows Libraries & ThirdParty
+        id: windows-libraries-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ github.workspace }}/../Libraries
@@ -71,6 +72,15 @@ jobs:
       - name: Prepare libraries
         shell: cmd
         run: Telegram\build\prepare\win.bat
+
+      - name: Save Windows Libraries & ThirdParty
+        if: steps.windows-libraries-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ github.workspace }}/../Libraries
+            ${{ github.workspace }}/../ThirdParty
+          key: ${{ steps.windows-libraries-cache.outputs.cache-primary-key }}
 
       - name: Configure Release build
         shell: cmd
@@ -144,8 +154,9 @@ jobs:
           xcodebuild -version
           df -h "$GITHUB_WORKSPACE"
 
-      - name: Cache macOS Libraries & ThirdParty
-        uses: actions/cache@v4
+      - name: Restore macOS Libraries & ThirdParty
+        id: macos-libraries-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ github.workspace }}/../Libraries
@@ -158,6 +169,15 @@ jobs:
         run: |
           ./Telegram/build/prepare/mac.sh
           df -h "$GITHUB_WORKSPACE"
+
+      - name: Save macOS Libraries & ThirdParty
+        if: steps.macos-libraries-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ github.workspace }}/../Libraries
+            ${{ github.workspace }}/../ThirdParty
+          key: ${{ steps.macos-libraries-cache.outputs.cache-primary-key }}
 
       - name: Configure Release build
         run: |
