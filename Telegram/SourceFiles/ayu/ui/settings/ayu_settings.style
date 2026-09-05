@@ -36,3 +36,110 @@ filtersExcludeIcon: IconButton(infoLayerTopBarClose) {
 	iconOver: icon {{ "menu/tag_remove", boxTitleCloseFgOver }};
 	iconPosition: point(8px, -1px);
 }
+
+customEndpointBoxWidth: 480px;
+
+customEndpointSummary: FlatLabel(boxLabel) {
+	minWidth: 432px;
+}
+customEndpointSummaryPadding: margins(24px, 8px, 24px, 4px);
+
+customEndpointEnvironment: FlatLabel(boxDividerLabel) {
+	minWidth: 432px;
+	textFg: windowActiveTextFg;
+}
+customEndpointEnvironmentPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointDescription: FlatLabel(boxDividerLabel) {
+	minWidth: 432px;
+}
+customEndpointDescriptionPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointModeTitlePadding: margins(24px, 0px, 24px, 8px);
+customEndpointOptionPadding: margins(24px, 0px, 24px, 4px);
+customEndpointOptionLastPadding: margins(24px, 0px, 24px, 12px);
+customEndpointSectionPadding: margins(0px, 0px, 0px, 0px);
+
+customEndpointSingleInput: InputField(defaultInputField) {
+	heightMin: 48px;
+	heightMax: 48px;
+}
+customEndpointSingleInputPadding: margins(24px, 0px, 24px, 12px);
+customEndpointSingleInputLastPadding: margins(24px, 0px, 24px, 16px);
+
+customEndpointInput: InputField(defaultInputField) {
+	heightMin: 156px;
+	heightMax: 156px;
+	textMargins: margins(12px, 10px, 12px, 10px);
+	placeholderMargins: margins(12px, 10px, 12px, 10px);
+	placeholderAlign: align(topleft);
+	placeholderScale: 0.;
+}
+customEndpointInputPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointPublicKeyDescriptionPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointPublicKeyInput: InputField(defaultInputField) {
+	heightMin: 132px;
+	heightMax: 132px;
+	textMargins: margins(12px, 10px, 12px, 10px);
+	placeholderMargins: margins(12px, 10px, 12px, 10px);
+	placeholderAlign: align(topleft);
+	placeholderScale: 0.;
+}
+customEndpointPublicKeyInputPadding: margins(24px, 0px, 24px, 8px);
+
+customEndpointPublicKeyStatus: FlatLabel(boxDividerLabel) {
+	minWidth: 432px;
+	textFg: windowActiveTextFg;
+}
+customEndpointPublicKeyStatusPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointWarning: FlatLabel(boxDividerLabel) {
+	minWidth: 432px;
+}
+customEndpointWarningPadding: margins(24px, 0px, 24px, 8px);
+customEndpointWarningLastPadding: margins(24px, 0px, 24px, 12px);
+
+customEndpointError: FlatLabel(boxDividerLabel) {
+	minWidth: 432px;
+	textFg: boxTextFgError;
+}
+customEndpointErrorPadding: margins(24px, 0px, 24px, 8px);
+
+customEndpointStatus: FlatLabel(boxLabel) {
+	minWidth: 432px;
+}
+customEndpointStatusPadding: margins(24px, 0px, 24px, 16px);
+
+tgWsProxyBoxWidth: 520px;
+
+tgWsProxyDescription: FlatLabel(boxDividerLabel) {
+	minWidth: 472px;
+}
+tgWsProxyDescriptionPadding: margins(24px, 8px, 24px, 8px);
+tgWsProxySectionDescriptionPadding: margins(24px, 0px, 24px, 10px);
+
+tgWsProxyStatus: FlatLabel(boxLabel) {
+	minWidth: 472px;
+	textFg: windowActiveTextFg;
+}
+tgWsProxyStatusPadding: margins(24px, 0px, 24px, 12px);
+
+tgWsProxyCheckboxPadding: margins(24px, 4px, 24px, 8px);
+
+tgWsProxyField: InputField(defaultInputField) {
+	heightMin: 48px;
+	heightMax: 48px;
+}
+tgWsProxyFieldPadding: margins(24px, 0px, 24px, 12px);
+tgWsProxyFieldLastPadding: margins(24px, 0px, 24px, 16px);
+
+tgWsProxyDcInput: InputField(defaultInputField) {
+	heightMin: 112px;
+	heightMax: 112px;
+	textMargins: margins(12px, 10px, 12px, 10px);
+	placeholderMargins: margins(12px, 10px, 12px, 10px);
+	placeholderAlign: align(topleft);
+	placeholderScale: 0.;
+}

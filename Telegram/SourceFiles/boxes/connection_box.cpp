@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/connection_box.h"
 
+#include "ayu/tg_ws_proxy.h"
+#include "ayu/ui/boxes/tg_ws_proxy_box.h"
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/qthelp_regex.h"
@@ -70,6 +72,43 @@ namespace {
 constexpr auto kSaveSettingsDelayedTimeout = crl::time(1000);
 
 using ProxyData = MTP::ProxyData;
+
+enum class ProxyMode {
+	Disabled,
+	System,
+	Custom,
+	TgWsProxy,
+};
+
+[[nodiscard]] ProxyMode CurrentProxyMode(
+		const Core::SettingsProxy &settings) {
+	if (Ayu::IsTgWsProxyEnabled()) {
+		return ProxyMode::TgWsProxy;
+	}
+	switch (settings.settings()) {
+	case ProxyData::Settings::Disabled:
+		return ProxyMode::Disabled;
+	case ProxyData::Settings::System:
+		return ProxyMode::System;
+	case ProxyData::Settings::Enabled:
+		return ProxyMode::Custom;
+	}
+	Unexpected("ProxyData::Settings value.");
+}
+
+[[nodiscard]] ProxyData::Settings ProxySettingsFromMode(ProxyMode mode) {
+	switch (mode) {
+	case ProxyMode::Disabled:
+		return ProxyData::Settings::Disabled;
+	case ProxyMode::System:
+		return ProxyData::Settings::System;
+	case ProxyMode::Custom:
+		return ProxyData::Settings::Enabled;
+	case ProxyMode::TgWsProxy:
+		break;
+	}
+	Unexpected("tg-ws-proxy does not map to persistent proxy settings.");
+}
 
 [[nodiscard]] int ClosestProxyRotationTimeoutSection(int value) {
 	auto result = 0;
@@ -653,11 +692,14 @@ private:
 	int rowHeight() const;
 	void refreshProxyForCalls();
 	void refreshProxyRotation();
+	void refreshTgWsProxy();
+	void setProxyMode(ProxyMode mode);
 
 	not_null<ProxiesBoxController*> _controller;
 	Core::SettingsProxy &_settings;
 	QPointer<Ui::Checkbox> _tryIPv6;
-	std::shared_ptr<Ui::RadioenumGroup<ProxyData::Settings>> _proxySettings;
+	std::shared_ptr<Ui::RadioenumGroup<ProxyMode>> _proxySettings;
+	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _tgWsProxyOptions;
 	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyForCalls;
 	QPointer<Ui::SlideWrap<Ui::Checkbox>> _proxyRotation;
 	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> _proxyRotationOptions;
@@ -667,6 +709,7 @@ private:
 	object_ptr<Ui::VerticalLayout> _initialWrap;
 	QPointer<Ui::VerticalLayout> _wrap;
 	int _currentProxySupportsCallsId = 0;
+	bool _syncingProxyMode = false;
 
 	base::flat_map<int, base::unique_qptr<ProxyRow>> _rows;
 
@@ -1166,29 +1209,57 @@ void ProxiesBox::setupContent() {
 			_settings.tryIPv6()),
 		st::proxyTryIPv6Padding);
 	_proxySettings
-		= std::make_shared<Ui::RadioenumGroup<ProxyData::Settings>>(
-			_settings.settings());
+		= std::make_shared<Ui::RadioenumGroup<ProxyMode>>(
+			CurrentProxyMode(_settings));
 	inner->add(
-		object_ptr<Ui::Radioenum<ProxyData::Settings>>(
+		object_ptr<Ui::Radioenum<ProxyMode>>(
 			inner,
 			_proxySettings,
-			ProxyData::Settings::Disabled,
+			ProxyMode::Disabled,
 			tr::lng_proxy_disable(tr::now)),
 		st::proxyUsePadding);
 	inner->add(
-		object_ptr<Ui::Radioenum<ProxyData::Settings>>(
+		object_ptr<Ui::Radioenum<ProxyMode>>(
 			inner,
 			_proxySettings,
-			ProxyData::Settings::System,
+			ProxyMode::System,
 			tr::lng_proxy_use_system_settings(tr::now)),
 		st::proxyUsePadding);
 	inner->add(
-		object_ptr<Ui::Radioenum<ProxyData::Settings>>(
+		object_ptr<Ui::Radioenum<ProxyMode>>(
 			inner,
 			_proxySettings,
-			ProxyData::Settings::Enabled,
+			ProxyMode::Custom,
 			tr::lng_proxy_use_custom(tr::now)),
 		st::proxyUsePadding);
+#ifdef Q_OS_WIN
+	inner->add(
+		object_ptr<Ui::Radioenum<ProxyMode>>(
+			inner,
+			_proxySettings,
+			ProxyMode::TgWsProxy,
+			tr::ayu_tg_ws_proxy_option(tr::now)),
+		st::proxyUsePadding);
+	_tgWsProxyOptions = inner->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			inner,
+			object_ptr<Ui::VerticalLayout>(inner)));
+	const auto tgWsProxyContent = _tgWsProxyOptions->entity();
+	tgWsProxyContent->add(
+		object_ptr<Ui::FlatLabel>(
+			tgWsProxyContent,
+			tr::ayu_tg_ws_proxy_main_description(),
+			st::boxDividerLabel),
+		st::proxyAboutPadding);
+	const auto tgWsProxySettings = Settings::AddButtonWithIcon(
+		tgWsProxyContent,
+		tr::ayu_tg_ws_proxy_configure(),
+		st::settingsButton,
+		{ &st::menuIconSettings });
+	tgWsProxySettings->setClickedCallback([=] {
+		getDelegate()->show(Ayu::TgWsProxySettingsBox());
+	});
+#endif
 	_proxyForCalls = inner->add(
 		object_ptr<Ui::SlideWrap<Ui::Checkbox>>(
 			inner,
@@ -1263,13 +1334,25 @@ void ProxiesBox::setupContent() {
 		inner,
 		st::proxyRowPadding.bottom()));
 
-	_proxySettings->setChangedCallback([=](ProxyData::Settings value) {
-		if (!_controller->setProxySettings(value)) {
-			_proxySettings->setValue(_settings.settings());
-			addNewProxy();
+	_proxySettings->setChangedCallback([=](ProxyMode value) {
+		if (_syncingProxyMode) {
+			return;
+		}
+		if (value == ProxyMode::TgWsProxy) {
+			Ayu::SetTgWsProxyEnabled(true);
+			getDelegate()->show(Ayu::TgWsProxySettingsBox());
+		} else {
+			Ayu::SetTgWsProxyEnabled(false);
+			if (!_controller->setProxySettings(
+				ProxySettingsFromMode(value))) {
+				setProxyMode(CurrentProxyMode(_settings));
+				addNewProxy();
+				return;
+			}
 		}
 		refreshProxyForCalls();
 		refreshProxyRotation();
+		refreshTgWsProxy();
 	});
 	_tryIPv6->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
@@ -1277,11 +1360,24 @@ void ProxiesBox::setupContent() {
 	}, _tryIPv6->lifetime());
 
 	_controller->proxySettingsValue(
-	) | rpl::on_next([=](ProxyData::Settings value) {
-		_proxySettings->setValue(value);
+	) | rpl::on_next([=](ProxyData::Settings) {
+		if (!Ayu::IsTgWsProxyEnabled()) {
+			setProxyMode(CurrentProxyMode(_settings));
+		}
 		refreshProxyForCalls();
 		refreshProxyRotation();
 	}, inner->lifetime());
+#ifdef Q_OS_WIN
+	Ayu::TgWsProxyEnabledValue(
+	) | rpl::on_next([=](bool enabled) {
+		setProxyMode(enabled
+			? ProxyMode::TgWsProxy
+			: CurrentProxyMode(_settings));
+		refreshProxyForCalls();
+		refreshProxyRotation();
+		refreshTgWsProxy();
+	}, inner->lifetime());
+#endif
 
 	_proxyForCalls->entity()->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
@@ -1303,9 +1399,13 @@ void ProxiesBox::setupContent() {
 	}
 	refreshProxyForCalls();
 	refreshProxyRotation();
+	refreshTgWsProxy();
 	_proxyForCalls->finishAnimating();
 	_proxyRotation->finishAnimating();
 	_proxyRotationOptions->finishAnimating();
+	if (_tgWsProxyOptions) {
+		_tgWsProxyOptions->finishAnimating();
+	}
 
 	{
 		const auto wrap = inner->add(
@@ -1345,7 +1445,7 @@ void ProxiesBox::refreshProxyForCalls() {
 		return;
 	}
 	_proxyForCalls->toggle(
-		(_proxySettings->current() == ProxyData::Settings::Enabled
+		(_proxySettings->current() == ProxyMode::Custom
 			&& _currentProxySupportsCallsId != 0),
 		anim::type::normal);
 }
@@ -1355,13 +1455,30 @@ void ProxiesBox::refreshProxyRotation() {
 		return;
 	}
 	const auto visible = (_proxySettings->current()
-			== ProxyData::Settings::Enabled)
+			== ProxyMode::Custom)
 		&& _settings.selected()
 		&& (_settings.list().size() > 1);
 	_proxyRotation->toggle(visible, anim::type::normal);
 	_proxyRotationOptions->toggle(
 		visible && _proxyRotation->entity()->checked(),
 		anim::type::normal);
+}
+
+void ProxiesBox::refreshTgWsProxy() {
+	if (_tgWsProxyOptions) {
+		_tgWsProxyOptions->toggle(
+			_proxySettings->current() == ProxyMode::TgWsProxy,
+			anim::type::normal);
+	}
+}
+
+void ProxiesBox::setProxyMode(ProxyMode mode) {
+	if (_proxySettings->current() == mode) {
+		return;
+	}
+	_syncingProxyMode = true;
+	_proxySettings->setValue(mode);
+	_syncingProxyMode = false;
 }
 
 int ProxiesBox::rowHeight() const {

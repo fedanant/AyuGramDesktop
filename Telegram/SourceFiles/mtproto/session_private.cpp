@@ -1707,8 +1707,9 @@ SessionPrivate::HandleResult SessionPrivate::handleOneReceived(
 
 		_sessionSalt = data.vnew_server_salt().v;
 
-		// Don't force time update here.
-		base::unixtime::update(info.serverTime);
+		if (!_instance->isEndpointTestMode()) {
+			base::unixtime::update(info.serverTime);
+		}
 
 		if (_bindMsgId) {
 			LOG(("Message Info: bad_server_salt received while binding temp key, restarting."));
@@ -2153,6 +2154,9 @@ bool SessionPrivate::requestsFixTimeSalt(const QVector<MTPlong> &ids, const Oute
 void SessionPrivate::correctUnixtimeByFastRequest(
 		const QVector<MTPlong> &ids,
 		TimeId serverTime) {
+	if (_instance->isEndpointTestMode()) {
+		return;
+	}
 	const auto now = crl::now();
 
 	QReadLocker locker(_sessionData->haveSentMutex());
@@ -2175,6 +2179,9 @@ void SessionPrivate::correctUnixtimeByFastRequest(
 }
 
 void SessionPrivate::correctUnixtimeWithBadLocal(TimeId serverTime) {
+	if (_instance->isEndpointTestMode()) {
+		return;
+	}
 	SyncTimeRequestDuration = kFastRequestDuration;
 	base::unixtime::update(serverTime, true);
 }
@@ -2642,6 +2649,7 @@ DcType SessionPrivate::tryAcquireKeyCreation() {
 	auto request = DcKeyRequest();
 	request.persistentNeeded = (acquired == CreatingKeyType::Persistent);
 	request.temporaryExpiresIn = kTemporaryExpiresIn;
+	request.allowTimeSync = !_instance->isEndpointTestMode();
 	_keyCreator = std::make_unique<BoundKeyCreator>(
 		request,
 		std::move(delegate));

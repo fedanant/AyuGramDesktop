@@ -115,12 +115,16 @@ set(ayugram_files
         ayu/ayu_url_handlers.h
         ayu/ayu_state.cpp
         ayu/ayu_state.h
+        ayu/tg_ws_proxy.cpp
+        ayu/tg_ws_proxy.h
         ayu/ayu_settings.cpp
         ayu/ayu_settings.h
         ayu/ayu_lang.cpp
         ayu/ayu_lang.h
         ayu/ayu_infra.cpp
         ayu/ayu_infra.h
+        ayu/mentions/unread_mentions_model.cpp
+        ayu/mentions/unread_mentions_model.h
         ayu/utils/ayu_mapper.cpp
         ayu/utils/ayu_mapper.h
         ayu/utils/qt_key_modifiers_extended.h
@@ -180,6 +184,10 @@ set(ayugram_files
         ayu/ui/message_history/history_item.h
         ayu/ui/message_history/history_section.cpp
         ayu/ui/message_history/history_section.h
+        ayu/ui/boxes/custom_endpoint_box.cpp
+        ayu/ui/boxes/custom_endpoint_box.h
+        ayu/ui/boxes/tg_ws_proxy_box.cpp
+        ayu/ui/boxes/tg_ws_proxy_box.h
         ayu/ui/boxes/edit_mark_box.cpp
         ayu/ui/boxes/edit_mark_box.h
         ayu/ui/boxes/font_selector.cpp
@@ -196,6 +204,8 @@ set(ayugram_files
         ayu/ui/boxes/donate_info_box.h
         ayu/ui/boxes/plugin_info_box.cpp
         ayu/ui/boxes/plugin_info_box.h
+        ayu/ui/boxes/unread_mentions_box.cpp
+        ayu/ui/boxes/unread_mentions_box.h
         ayu/ui/components/image_view.cpp
         ayu/ui/components/image_view.h
         ayu/ui/components/icon_picker.cpp
@@ -2610,6 +2620,29 @@ else()
 endif()
 
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
+
+if (WIN32)
+    set(tg_ws_proxy_source ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/tg-ws-proxy)
+    set(tg_ws_proxy_build ${CMAKE_CURRENT_BINARY_DIR}/tg_ws_proxy/$<CONFIG>)
+    if (is_multi_config)
+        set(tg_ws_proxy_output ${output_folder}/$<CONFIG>/AyuWsProxy.exe)
+    else()
+        set(tg_ws_proxy_output ${output_folder}/AyuWsProxy.exe)
+    endif()
+    add_custom_target(TgWsProxy
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/build/tg_ws_proxy/build.py
+            --source ${tg_ws_proxy_source}
+            --build ${tg_ws_proxy_build}
+            --output ${tg_ws_proxy_output}
+            --runner ${CMAKE_CURRENT_SOURCE_DIR}/build/tg_ws_proxy/runner.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        VERBATIM
+    )
+    add_dependencies(Telegram TgWsProxy)
+    set_target_properties(TgWsProxy PROPERTIES FOLDER ThirdParty)
+endif()
 
 if (MSVC)
     target_link_libraries(Telegram

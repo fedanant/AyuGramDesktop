@@ -146,9 +146,23 @@ void Controller::showAccount(not_null<Main::Account*> account) {
 	showAccount(account, ShowAtUnreadMsgId);
 }
 
+void Controller::showPhoneLogin(not_null<Main::Account*> account) {
+	showAccount(
+		account,
+		ShowAtUnreadMsgId,
+		Intro::EnterPoint::Phone);
+}
+
 void Controller::showAccount(
 		not_null<Main::Account*> account,
 		MsgId singlePeerShowAtMsgId) {
+	showAccount(account, singlePeerShowAtMsgId, Intro::EnterPoint::Qr);
+}
+
+void Controller::showAccount(
+		not_null<Main::Account*> account,
+		MsgId singlePeerShowAtMsgId,
+		Intro::EnterPoint introPoint) {
 	Expects(isPrimary() || _id.account == account);
 
 	const auto prevAccount = _id.account;
@@ -218,6 +232,7 @@ void Controller::showAccount(
 		} else {
 			sideBarChanged();
 			setupIntro(
+				introPoint,
 				accountBeforeIntro.get(),
 				std::move(oldContentCache));
 			_widget.updateGlobalMenu();
@@ -409,10 +424,11 @@ void Controller::clearSetupEmailLock() {
 }
 
 void Controller::setupIntro(
+		Intro::EnterPoint point,
 		Main::Account *accountBeforeIntro,
 		QPixmap oldContentCache) {
 	_widget.setupIntro(
-		Intro::EnterPoint::Qr,
+		point,
 		accountBeforeIntro,
 		std::move(oldContentCache));
 }

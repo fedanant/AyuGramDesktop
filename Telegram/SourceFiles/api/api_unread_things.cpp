@@ -29,6 +29,30 @@ constexpr auto kPreloadIfLess = 5;
 constexpr auto kFirstRequestLimit = 10;
 constexpr auto kNextRequestLimit = 100;
 
+[[nodiscard]] MentionsLoadResult MakeMentionsLoadResult(
+		PeerId peerId,
+		int beforeLoaded,
+		const History *history,
+		bool success) {
+	const auto afterLoaded = history
+		? history->unreadMentions().loadedCount()
+		: beforeLoaded;
+	const auto fullCount = history
+		? history->unreadMentions().count()
+		: -1;
+	const auto allLoaded = (fullCount >= 0) && (afterLoaded >= fullCount);
+	return {
+		.peerId = peerId,
+		.beforeLoaded = beforeLoaded,
+		.afterLoaded = afterLoaded,
+		.success = success,
+		.allLoaded = allLoaded,
+		.stalled = success
+			&& (afterLoaded <= beforeLoaded)
+			&& (fullCount > afterLoaded),
+	};
+}
+
 } // namespace
 
 UnreadThings::UnreadThings(not_null<ApiWrap*> api) : _api(api) {
@@ -66,6 +90,10 @@ bool UnreadThings::trackPollVotes(Data::Thread *thread) const {
 		&& !peer->isMonoforum();
 }
 
+rpl::producer<MentionsLoadResult> UnreadThings::mentionsLoadResults() const {
+	return _mentionsLoadResults.events();
+}
+
 void UnreadThings::preloadEnough(Data::Thread *thread) {
 	if (trackMentions(thread)) {
 		preloadEnoughMentions(thread);
@@ -98,7 +126,11 @@ void UnreadThings::preloadEnoughMentions(not_null<Data::Thread*> thread) {
 	const auto loadedCount = thread->unreadMentions().loadedCount();
 	const auto allLoaded = (fullCount >= 0) && (loadedCount >= fullCount);
 	if (fullCount >= 0 && loadedCount < kPreloadIfLess && !allLoaded) {
-		requestMentions(thread, loadedCount);
+		if (thread->asTopic()) {
+			requestMentions(thread, loadedCount);
+		} else {
+			(void)requestMoreMentions(thread);
+		}
 	}
 }
 
@@ -121,8 +153,14 @@ void UnreadThings::preloadEnoughPollVotes(not_null<Data::Thread*> thread) {
 }
 
 void UnreadThings::cancelRequests(not_null<Data::Thread*> thread) {
-	if (const auto requestId = _mentionsRequests.take(thread)) {
+	if (const auto requestId = _topicMentionsRequests.take(thread)) {
 		_api->request(*requestId).cancel();
+	}
+	if (const auto history = thread->asHistory()) {
+		const auto peerId = history->peer->id;
+		if (const auto requestId = _globalMentionsRequests.take(peerId)) {
+			_api->request(*requestId).cancel();
+		}
 	}
 	if (const auto requestId = _reactionsRequests.take(thread)) {
 		_api->request(*requestId).cancel();
@@ -132,10 +170,64 @@ void UnreadThings::cancelRequests(not_null<Data::Thread*> thread) {
 	}
 }
 
+RequestMoreMentionsResult UnreadThings::requestMoreMentions(
+		not_null<Data::Thread*> thread) {
+	const auto history = thread->owningHistory();
+	const auto peerId = history->peer->id;
+	const auto fullCount = history->unreadMentions().count();
+	const auto loaded = history->unreadMentions().loadedCount();
+	const auto allLoaded = (fullCount >= 0) && (loaded >= fullCount);
+	if (!trackMentions(history)
+		|| _globalMentionsRequests.contains(peerId)
+		|| allLoaded) {
+		return RequestMoreMentionsResult::Rejected;
+	}
+	const auto offsetId = std::max(
+		history->unreadMentions().maxLoaded(),
+		MsgId(1));
+	const auto limit = loaded ? kNextRequestLimit : kFirstRequestLimit;
+	const auto addOffset = loaded ? -(limit + 1) : -limit;
+	const auto maxId = 0;
+	const auto minId = 0;
+	const auto weakHistory = base::make_weak(history.get());
+	using Flag = MTPmessages_GetUnreadMentions::Flag;
+	const auto requestId = _api->request(MTPmessages_GetUnreadMentions(
+		MTP_flags(Flag()),
+		history->peer->input(),
+		MTP_int(0),
+		MTP_int(offsetId),
+		MTP_int(addOffset),
+		MTP_int(limit),
+		MTP_int(maxId),
+		MTP_int(minId)
+	)).done([=](const MTPmessages_Messages &result) {
+		if (const auto history = weakHistory.get()) {
+			history->unreadMentions().addSlice(result, loaded);
+		}
+		_globalMentionsRequests.remove(peerId);
+		const auto current = weakHistory.get();
+		_mentionsLoadResults.fire(MakeMentionsLoadResult(
+			peerId,
+			loaded,
+			current,
+			current != nullptr));
+	}).fail([=] {
+		_globalMentionsRequests.remove(peerId);
+		_mentionsLoadResults.fire(MakeMentionsLoadResult(
+			peerId,
+			loaded,
+			weakHistory.get(),
+			false));
+	}).send();
+	_globalMentionsRequests.emplace(peerId, requestId);
+	return RequestMoreMentionsResult::Started;
+}
+
 void UnreadThings::requestMentions(
 		not_null<Data::Thread*> thread,
 		int loaded) {
-	if (_mentionsRequests.contains(thread) || thread->asSublist()) {
+	const auto topic = thread->asTopic();
+	if (_topicMentionsRequests.contains(thread) || !topic) {
 		return;
 	}
 	const auto offsetId = std::max(
@@ -146,24 +238,69 @@ void UnreadThings::requestMentions(
 	const auto maxId = 0;
 	const auto minId = 0;
 	const auto history = thread->owningHistory();
-	const auto topic = thread->asTopic();
 	using Flag = MTPmessages_GetUnreadMentions::Flag;
 	const auto requestId = _api->request(MTPmessages_GetUnreadMentions(
-		MTP_flags(topic ? Flag::f_top_msg_id : Flag()),
+		MTP_flags(Flag::f_top_msg_id),
 		history->peer->input(),
-		MTP_int(topic ? topic->rootId() : 0),
+		MTP_int(topic->rootId()),
 		MTP_int(offsetId),
 		MTP_int(addOffset),
 		MTP_int(limit),
 		MTP_int(maxId),
 		MTP_int(minId)
 	)).done([=](const MTPmessages_Messages &result) {
-		_mentionsRequests.remove(thread);
+		_topicMentionsRequests.remove(thread);
 		thread->unreadMentions().addSlice(result, loaded);
 	}).fail([=] {
-		_mentionsRequests.remove(thread);
+		_topicMentionsRequests.remove(thread);
 	}).send();
-	_mentionsRequests.emplace(thread, requestId);
+	_topicMentionsRequests.emplace(thread, requestId);
+}
+
+void UnreadThings::readAllMentions(
+		not_null<Data::Thread*> thread,
+		Fn<void(bool)> done) {
+	readAllMentions(base::make_weak(thread), std::move(done));
+}
+
+void UnreadThings::readAllMentions(
+		base::weak_ptr<Data::Thread> weakThread,
+		Fn<void(bool)> done) {
+	const auto thread = weakThread.get();
+	if (!thread) {
+		done(false);
+		return;
+	}
+	const auto peer = thread->peer();
+	const auto topic = thread->asTopic();
+	const auto rootId = topic ? topic->rootId() : 0;
+	using Flag = MTPmessages_ReadMentions::Flag;
+	_api->request(MTPmessages_ReadMentions(
+		MTP_flags(rootId ? Flag::f_top_msg_id : Flag()),
+		peer->input(),
+		MTP_int(rootId)
+	)).done([=](const MTPmessages_AffectedHistory &result) {
+		const auto thread = weakThread.get();
+		if (!thread) {
+			done(false);
+			return;
+		}
+		const auto peer = thread->peer();
+		const auto offset = _api->applyAffectedHistory(peer, result);
+		if (offset > 0) {
+			readAllMentions(weakThread, done);
+			return;
+		}
+		const auto current = weakThread.get();
+		if (!current) {
+			done(false);
+			return;
+		}
+		current->owningHistory()->clearUnreadMentionsFor(rootId);
+		done(true);
+	}).fail([=] {
+		done(false);
+	}).send();
 }
 
 void UnreadThings::requestReactions(

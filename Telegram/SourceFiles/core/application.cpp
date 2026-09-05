@@ -267,6 +267,7 @@ Application::~Application() {
 	if (_saveSettingsTimer && _saveSettingsTimer->isActive()) {
 		Local::writeSettings();
 	}
+	AyuInfra::finish();
 
 	_windowStack.clear();
 	setLastActiveWindow(nullptr);
@@ -907,6 +908,20 @@ void Application::setCurrentProxy(
 	const auto was = current();
 	my.setSelected(proxy);
 	my.setSettings(settings);
+	const auto now = current();
+	refreshGlobalProxy();
+	_proxyChanges.fire({ was, now });
+	my.connectionTypeChangesNotify();
+	proxyRotationSettingsChanged();
+}
+
+void Application::setRuntimeProxy(std::optional<MTP::ProxyData> proxy) {
+	auto &my = _private->settings.proxy();
+	const auto current = [&] {
+		return my.isEnabled() ? my.selected() : MTP::ProxyData();
+	};
+	const auto was = current();
+	my.setRuntimeOverride(std::move(proxy));
 	const auto now = current();
 	refreshGlobalProxy();
 	_proxyChanges.fire({ was, now });

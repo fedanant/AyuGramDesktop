@@ -2,8 +2,6 @@
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
-Avoid building the project.
-
 If you're asked to create a Pull Request, then clearly state in PR description that it was AI generated.
 
 ## Working from Codex on Windows + WSL

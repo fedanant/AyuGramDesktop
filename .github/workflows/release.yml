@@ -1,0 +1,258 @@
+name: Release Build (Windows & macOS DMG)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (leave empty for automatic naming)'
+        required: false
+        type: string
+        default: ''
+      prerelease:
+        description: 'Mark as prerelease'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Apply MSVC Release patch to cmake submodule
+        run: python Telegram/build/patch_cmake.py
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 32GB
+          disk-root: "C:"
+
+      - name: Cache Windows Libraries & ThirdParty
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/../Libraries
+            ${{ github.workspace }}/../ThirdParty
+          key: libs-win-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/prepare/prepare.py') }}
+          restore-keys: |
+            libs-win-
+
+      - name: Prepare libraries
+        shell: cmd
+        run: Telegram\build\prepare\win.bat
+
+      - name: Configure Release build
+        shell: cmd
+        working-directory: Telegram
+        run: configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+
+      - name: Build AyuGram
+        shell: cmd
+        run: cmake --build out --config Release --target Telegram -- /m:2
+
+      - name: Package Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item out/Release/AyuGram.exe dist/AyuGram.exe
+          $filesToZip = @("out/Release/AyuGram.exe")
+          if (Test-Path "out/Release/AyuWsProxy.exe") {
+            Copy-Item out/Release/AyuWsProxy.exe dist/AyuWsProxy.exe
+            $filesToZip += "out/Release/AyuWsProxy.exe"
+          }
+          Compress-Archive -Path $filesToZip -DestinationPath dist/AyuGram-Windows-x64.zip -Force
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-Windows-Release
+          path: dist/*
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (DMG)
+    runs-on: macos-14
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Patch macOS Swift files
+        run: python3 Telegram/build/patch_mac.py
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew install automake cmake wget pkg-config gnu-tar ninja nasm meson create-dmg
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Cache macOS Libraries & ThirdParty
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/../Libraries
+            ${{ github.workspace }}/../ThirdParty
+          key: libs-mac-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/prepare/prepare.py') }}
+          restore-keys: |
+            libs-mac-
+
+      - name: Prepare libraries
+        run: |
+          ./Telegram/build/prepare/mac.sh
+
+      - name: Configure Release build
+        run: |
+          ./Telegram/configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+
+      - name: Build AyuGram
+        run: |
+          cmake --build out --config Release --target Telegram -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Package macOS DMG
+        run: |
+          APP_PATH=$(find out -name "AyuGram.app" -type d | head -n 1)
+          echo "Found app at: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: AyuGram.app not found!"
+            find out -maxdepth 4
+            exit 1
+          fi
+
+          mkdir -p dist
+          if command -v create-dmg &> /dev/null; then
+            create-dmg \
+              --volname "AyuGram" \
+              --window-pos 200 120 \
+              --window-size 600 400 \
+              --icon-size 100 \
+              --icon "AyuGram.app" 175 120 \
+              --hide-extension "AyuGram.app" \
+              --app-drop-link 425 120 \
+              "dist/AyuGram-macOS.dmg" \
+              "$APP_PATH" || {
+                echo "create-dmg exited with warning/code $?, falling back to hdiutil..."
+                hdiutil create -volname "AyuGram" -srcfolder "$APP_PATH" -ov -format UDZO "dist/AyuGram-macOS.dmg"
+              }
+          else
+            hdiutil create -volname "AyuGram" -srcfolder "$APP_PATH" -ov -format UDZO "dist/AyuGram-macOS.dmg"
+          fi
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-macOS-DMG
+          path: dist/AyuGram-macOS.dmg
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos]
+    if: always() && !cancelled() && (needs.build-windows.result == 'success' || needs.build-macos.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
+        if: needs.build-windows.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: AyuGram-Windows-Release
+          path: release_assets/windows
+
+      - name: Download macOS DMG artifact
+        if: needs.build-macos.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: AyuGram-macOS-DMG
+          path: release_assets/macos
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          else
+            TAG="release-${{ github.run_number }}"
+          fi
+
+          TITLE="AyuGram Release ($TAG)"
+          NOTES="Release build of AyuGram. Commit: ${{ github.sha }}"
+
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" == "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          ASSETS=()
+          if [ -f "release_assets/windows/AyuGram.exe" ]; then
+            ASSETS+=("release_assets/windows/AyuGram.exe#AyuGram.exe")
+          fi
+          if [ -f "release_assets/windows/AyuGram-Windows-x64.zip" ]; then
+            ASSETS+=("release_assets/windows/AyuGram-Windows-x64.zip#AyuGram-Windows-x64.zip")
+          fi
+          if [ -f "release_assets/macos/AyuGram-macOS.dmg" ]; then
+            ASSETS+=("release_assets/macos/AyuGram-macOS.dmg#AyuGram-macOS.dmg")
+          fi
+
+          echo "Publishing assets to release $TAG: ${ASSETS[*]}"
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" &> /dev/null; then
+            echo "Release $TAG exists, uploading assets..."
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "${{ github.repository }}"
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              $PRERELEASE_FLAG
+          fi

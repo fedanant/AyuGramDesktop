@@ -19,6 +19,8 @@ std::pair<QString, QString> stateName(const PeerId &id);
 class ForwardState
 {
 public:
+	explicit ForwardState(int chunks);
+
 	enum class State
 	{
 		Preparing,
@@ -26,10 +28,6 @@ public:
 		Sending,
 		Finished
 	};
-
-	explicit ForwardState(int totalChunks)
-	: totalChunks(totalChunks) {
-	}
 
 	ForwardState(const ForwardState &other)
 	: totalChunks(other.totalChunks)

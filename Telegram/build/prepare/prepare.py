@@ -480,9 +480,9 @@ win:
         make ^
         mingw-w64-x86_64-diffutils ^
         mingw-w64-x86_64-gperf ^
-        mingw-w64-x86_64-nasm ^
         mingw-w64-x86_64-perl ^
         mingw-w64-x86_64-pkgconf
+    pacman -U --noconfirm https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-nasm-2.16.03-1-any.pkg.tar.zst
 """, 'ThirdParty')
 
 stage('python', """
@@ -717,7 +717,7 @@ stage('libiconv', """
 mac:
     VERSION=1.18
     rm -f libiconv.tar.gz
-    wget --timeout=30 --tries=2 -O libiconv.tar.gz ftp://ftp.gnu.org/gnu/libiconv/libiconv-$VERSION.tar.gz || wget -O libiconv.tar.gz https://ftp.gnu.org/pub/gnu/libiconv/libiconv-$VERSION.tar.gz
+    wget --timeout=30 --tries=3 -O libiconv.tar.gz https://ftpmirror.gnu.org/libiconv/libiconv-$VERSION.tar.gz || wget --timeout=30 --tries=3 -O libiconv.tar.gz https://mirrors.kernel.org/gnu/libiconv/libiconv-$VERSION.tar.gz || wget --timeout=30 --tries=3 -O libiconv.tar.gz https://ftp.gnu.org/gnu/libiconv/libiconv-$VERSION.tar.gz
     rm -rf libiconv-$VERSION
     tar -xvzf libiconv.tar.gz
     rm libiconv.tar.gz

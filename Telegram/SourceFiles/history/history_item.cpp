@@ -809,7 +809,7 @@ HistoryItem::HistoryItem(
 		if (!text.text.isEmpty()) {
 			return dropForwardInfo
 				? DropDisallowedCustomEmoji(history->peer, text)
-				: TextWithEntities(text);
+				: TextWithEntities{ text };
 		}
 		if (const auto media = original->media()) {
 			return media->consumedMessageText();

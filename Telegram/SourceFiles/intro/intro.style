@@ -120,7 +120,9 @@ introPhone: InputField(introCountry) {
 	textMargins: margins(12px, 27px, 12px, 6px);
 	width: 225px;
 }
-introQrLoginLinkTop: 368px;
+introPhoneAuthLinksTop: 368px;
+introPhoneAuthLinksHorizontalSkip: 16px;
+introPhoneAuthLinksVerticalSkip: 8px;
 introName: introCountry;
 introPassword: introCountry;
 introPasswordTop: 74px;
@@ -156,6 +158,7 @@ introCountryIconPosition: point(8px, 37px);
 
 introErrorTop: 235px;
 introErrorBelowLinkTop: 220px;
+introPhoneErrorTop: 235px;
 
 introError: FlatLabel(introDescription) {
 }

@@ -253,15 +253,18 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 }
 
 bool SettingsProxy::isEnabled() const {
-	return _settings == MTP::ProxyData::Settings::Enabled;
+	return _runtimeOverride.has_value()
+		|| _settings == MTP::ProxyData::Settings::Enabled;
 }
 
 bool SettingsProxy::isSystem() const {
-	return _settings == MTP::ProxyData::Settings::System;
+	return !_runtimeOverride
+		&& _settings == MTP::ProxyData::Settings::System;
 }
 
 bool SettingsProxy::isDisabled() const {
-	return _settings == MTP::ProxyData::Settings::Disabled;
+	return !_runtimeOverride
+		&& _settings == MTP::ProxyData::Settings::Disabled;
 }
 
 bool SettingsProxy::checkIpWarningShown() const {
@@ -333,7 +336,9 @@ void SettingsProxy::setProxyRotationTimeout(int value) {
 }
 
 MTP::ProxyData::Settings SettingsProxy::settings() const {
-	return _settings;
+	return _runtimeOverride
+		? MTP::ProxyData::Settings::Enabled
+		: _settings;
 }
 
 void SettingsProxy::setSettings(MTP::ProxyData::Settings value) {
@@ -341,11 +346,20 @@ void SettingsProxy::setSettings(MTP::ProxyData::Settings value) {
 }
 
 MTP::ProxyData SettingsProxy::selected() const {
-	return _selected;
+	return _runtimeOverride.value_or(_selected);
 }
 
 void SettingsProxy::setSelected(MTP::ProxyData value) {
 	_selected = value;
+}
+
+bool SettingsProxy::hasRuntimeOverride() const {
+	return _runtimeOverride.has_value();
+}
+
+void SettingsProxy::setRuntimeOverride(
+		std::optional<MTP::ProxyData> value) {
+	_runtimeOverride = std::move(value);
 }
 
 const std::vector<MTP::ProxyData> &SettingsProxy::list() const {

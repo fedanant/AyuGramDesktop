@@ -22,6 +22,7 @@ namespace MTP::details {
 struct DcKeyRequest {
 	TimeId temporaryExpiresIn = 0;
 	bool persistentNeeded = false;
+	bool allowTimeSync = true;
 };
 
 enum class DcKeyError {

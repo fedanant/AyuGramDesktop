@@ -960,7 +960,7 @@ void AddBoostsUnrestrictLabels(not_null<Ui::VerticalLayout*> container) {
 			labels,
 			st::boostsUnrestrictLabel);
 		label->setMarkedText(
-			TextWithEntities(i ? many : one).append(QString::number(i + 1)));
+			TextWithEntities{ i ? many : one }.append(QString::number(i + 1)));
 		rpl::combine(
 			labels->widthValue(),
 			label->widthValue()

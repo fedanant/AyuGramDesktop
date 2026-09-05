@@ -174,7 +174,7 @@ bool RCManager::applyResponse(const QByteArray &response) {
 		const auto badgeData = badgeObj.toObject();
 		CustomBadge customBadge;
 		if (const auto emojiStatusId = badgeData.value("documentId").toVariant().toLongLong()) {
-			customBadge.emojiStatusId = EmojiStatusId(emojiStatusId);
+			customBadge.emojiStatusId = EmojiStatusId{ .documentId = DocumentId(emojiStatusId) };
 		} else {
 			continue;
 		}

@@ -8,12 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_dc_options.h"
 
 #include "mtproto/details/mtproto_rsa_public_key.h"
-#include "mtproto/facade.h"
 #include "mtproto/connection_tcp.h"
+#include "mtproto/facade.h"
 #include "storage/serialize_common.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QRegularExpression>
+#include <QtNetwork/QHostAddress>
 
 namespace MTP {
 namespace {
@@ -121,12 +122,16 @@ DcOptions::DcOptions(Environment environment)
 }
 
 DcOptions::DcOptions(const DcOptions &other)
-: _environment(other._environment)
-, _data(other._data)
-, _cdnDcIds(other._cdnDcIds)
-, _publicKeys(other._publicKeys)
-, _cdnPublicKeys(other._cdnPublicKeys)
-, _immutable(other._immutable) {
+: _environment(other._environment) {
+	ReadLocker lock(&other);
+	_data = other._data;
+	_confirmedCustomEndpointProfile = other._confirmedCustomEndpointProfile;
+	_confirmedCustomEndpointData = other._confirmedCustomEndpointData;
+	_confirmedCustomEndpointKeys = other._confirmedCustomEndpointKeys;
+	_cdnDcIds = other._cdnDcIds;
+	_publicKeys = other._publicKeys;
+	_cdnPublicKeys = other._cdnPublicKeys;
+	_immutable = other._immutable;
 }
 
 DcOptions::~DcOptions() = default;
@@ -204,7 +209,7 @@ void DcOptions::processFromList(
 
 	auto data = [&] {
 		if (overwrite) {
-			return base::flat_map<DcId, std::vector<Endpoint>>();
+			return EndpointMap();
 		}
 		ReadLocker lock(this);
 		return _data;
@@ -228,11 +233,11 @@ void DcOptions::processFromList(
 
 	const auto difference = [&] {
 		WriteLocker lock(this);
-		auto result = CountOptionsDifference(_data, data);
-		if (!result.empty()) {
+		const auto before = effectiveDataGuarded();
+		if (!CountOptionsDifference(_data, data).empty()) {
 			_data = std::move(data);
 		}
-		return result;
+		return CountOptionsDifference(before, effectiveDataGuarded());
 	}();
 	for (const auto dcId : difference) {
 		_changed.fire_copy(dcId);
@@ -252,42 +257,37 @@ void DcOptions::addFromOther(DcOptions &&options) {
 		return;
 	}
 
-	auto idsChanged = std::vector<DcId>();
+	auto incomingData = EndpointMap();
+	auto incomingCdnPublicKeys = decltype(_cdnPublicKeys)();
 	{
-		ReadLocker lock(&options);
+		WriteLocker lock(&options);
 		if (options._data.empty()) {
 			return;
 		}
+		incomingData = base::take(options._data);
+		incomingCdnPublicKeys = base::take(options._cdnPublicKeys);
+	}
 
-		idsChanged.reserve(options._data.size());
-		{
-			WriteLocker lock(this);
-			const auto changed = [&](const std::vector<Endpoint> &list) {
-				auto result = false;
-				for (const auto &endpoint : list) {
-					const auto dcId = endpoint.id;
-					const auto flags = endpoint.flags;
-					const auto &ip = endpoint.ip;
-					const auto port = endpoint.port;
-					const auto &secret = endpoint.secret;
-					if (applyOneGuarded(dcId, flags, ip, port, secret)) {
-						result = true;
-					}
-				}
-				return result;
-			};
-			for (const auto &item : base::take(options._data)) {
-				if (changed(item.second)) {
-					idsChanged.push_back(item.first);
-				}
-			}
-			for (auto &item : options._cdnPublicKeys) {
-				for (auto &entry : item.second) {
-					_cdnPublicKeys[item.first].insert(std::move(entry));
-				}
+	const auto idsChanged = [&] {
+		WriteLocker lock(this);
+		const auto before = effectiveDataGuarded();
+		for (const auto &item : incomingData) {
+			for (const auto &endpoint : item.second) {
+				applyOneGuarded(
+					endpoint.id,
+					endpoint.flags,
+					endpoint.ip,
+					endpoint.port,
+					endpoint.secret);
 			}
 		}
-	}
+		for (auto &item : incomingCdnPublicKeys) {
+			for (auto &entry : item.second) {
+				_cdnPublicKeys[item.first].insert(std::move(entry));
+			}
+		}
+		return CountOptionsDifference(before, effectiveDataGuarded());
+	}();
 	for (const auto dcId : idsChanged) {
 		_changed.fire_copy(dcId);
 	}
@@ -313,7 +313,7 @@ bool DcOptions::applyOneGuarded(
 }
 
 bool DcOptions::ApplyOneOption(
-		base::flat_map<DcId, std::vector<Endpoint>> &data,
+		EndpointMap &data,
 		DcId dcId,
 		Flags flags,
 		const std::string &ip,
@@ -336,14 +336,27 @@ bool DcOptions::ApplyOneOption(
 }
 
 std::vector<DcId> DcOptions::CountOptionsDifference(
-		const base::flat_map<DcId, std::vector<Endpoint>> &a,
-		const base::flat_map<DcId, std::vector<Endpoint>> &b) {
-	auto result = std::vector<DcId>();
-	const auto find = [](
+		const EndpointMap &a,
+		const EndpointMap &b) {
+	const auto canonicalIp = [](const std::string &ip) {
+		auto address = QHostAddress();
+		return address.setAddress(QString::fromStdString(ip))
+			? address.toString().toStdString()
+			: ip;
+	};
+	const auto equalEndpoint = [&](const Endpoint &a, const Endpoint &b) {
+		return a.id == b.id
+			&& a.flags == b.flags
+			&& canonicalIp(a.ip) == canonicalIp(b.ip)
+			&& a.port == b.port
+			&& a.secret == b.secret;
+	};
+	auto result = base::flat_set<DcId>();
+	const auto find = [&](
 			const std::vector<Endpoint> &where,
 			const Endpoint &what) {
 		for (const auto &endpoint : where) {
-			if (endpoint.ip == what.ip && endpoint.port == what.port) {
+			if (equalEndpoint(endpoint, what)) {
 				return true;
 			}
 		}
@@ -370,20 +383,83 @@ std::vector<DcId> DcOptions::CountOptionsDifference(
 		const auto aId = (i == end(a)) ? max : i->first;
 		const auto bId = (j == end(b)) ? max : j->first;
 		if (aId < bId) {
-			result.push_back(aId);
+			result.emplace(BareDcId(aId));
 			++i;
 		} else if (bId < aId) {
-			result.push_back(bId);
+			result.emplace(BareDcId(bId));
 			++j;
 		} else {
 			if (!equal(i->second, j->second)) {
-				result.push_back(aId);
+				result.emplace(BareDcId(aId));
 			}
 			++i;
 			++j;
 		}
 	}
-	return result;
+	return std::vector<DcId>(result.begin(), result.end());
+}
+
+std::vector<DcId> DcOptions::CountCustomEndpointDifference(
+		const EndpointMap &before,
+		const EndpointMap &after,
+		const CustomEndpointStateSnapshot &beforeCustom,
+		const CustomEndpointStateSnapshot &afterCustom) {
+	auto result = base::flat_set<DcId>();
+	for (const auto dcId : CountOptionsDifference(before, after)) {
+		result.emplace(BareDcId(dcId));
+	}
+	if (beforeCustom.publicKeyPem != afterCustom.publicKeyPem) {
+		for (const auto &item : beforeCustom.data) {
+			result.emplace(BareDcId(item.first));
+		}
+		for (const auto &item : afterCustom.data) {
+			result.emplace(BareDcId(item.first));
+		}
+	}
+	return std::vector<DcId>(result.begin(), result.end());
+}
+
+bool DcOptions::PrepareCustomEndpointProfile(
+		CustomEndpointProfile &profile,
+		Environment environment,
+		EndpointMap &data,
+		PublicKeyMap &keys) {
+	data.clear();
+	keys.clear();
+	if (profile.environment != environment) {
+		return false;
+	}
+
+	auto publicKey = CustomEndpointPublicKeyResult();
+	if (!profile.publicKeyPem.isEmpty()) {
+		publicKey = ValidateCustomEndpointPublicKey(profile.publicKeyPem);
+		if (!IsValidCustomEndpoint(publicKey.validation)) {
+			return false;
+		}
+		profile.publicKeyPem = publicKey.publicKeyPem;
+	}
+	if (!IsValidCustomEndpoint(ValidateCustomEndpointProfile(profile))) {
+		return false;
+	}
+
+	for (auto &custom : profile.endpoints) {
+		auto address = QHostAddress();
+		if (!address.setAddress(QString::fromStdString(custom.ip))) {
+			return false;
+		}
+		custom.ip = address.toString().toStdString();
+		ApplyOneOption(
+			data,
+			custom.dcId,
+			custom.flags,
+			custom.ip,
+			custom.port,
+			{});
+	}
+	if (publicKey.key.valid()) {
+		keys.emplace(publicKey.fingerprint, std::move(publicKey.key));
+	}
+	return true;
 }
 
 QByteArray DcOptions::serialize() const {
@@ -577,6 +653,161 @@ rpl::producer<> DcOptions::cdnConfigChanged() const {
 	return _cdnConfigChanged.events();
 }
 
+auto DcOptions::confirmedCustomEndpointProfile() const
+-> std::optional<CustomEndpointProfile> {
+	ReadLocker lock(this);
+	return _confirmedCustomEndpointProfile;
+}
+
+auto DcOptions::confirmedCustomEndpointProfileChanged() const
+-> rpl::producer<> {
+	return _confirmedCustomEndpointProfileChanged.events();
+}
+
+auto DcOptions::customEndpointCandidate() const
+-> std::optional<CustomEndpointCandidate> {
+	ReadLocker lock(this);
+	return _customEndpointCandidate;
+}
+
+bool DcOptions::customEndpointCandidateActive() const {
+	ReadLocker lock(this);
+	return _customEndpointCandidate.has_value();
+}
+
+bool DcOptions::hasCustomEndpoint() const {
+	ReadLocker lock(this);
+	return _confirmedCustomEndpointProfile.has_value()
+		|| _customEndpointCandidate.has_value();
+}
+
+bool DcOptions::setConfirmedCustomEndpointProfile(
+		std::optional<CustomEndpointProfile> profile) {
+	auto data = EndpointMap();
+	auto keys = PublicKeyMap();
+	if (profile
+		&& !PrepareCustomEndpointProfile(
+			*profile,
+			_environment,
+			data,
+			keys)) {
+		return false;
+	}
+
+	auto difference = std::vector<DcId>();
+	{
+		WriteLocker lock(this);
+		if (_customEndpointCandidate) {
+			return false;
+		} else if (_confirmedCustomEndpointProfile == profile) {
+			return true;
+		}
+		const auto before = effectiveDataGuarded();
+		const auto beforeCustom = customEndpointStateSnapshotGuarded();
+		_confirmedCustomEndpointProfile = std::move(profile);
+		_confirmedCustomEndpointData = std::move(data);
+		_confirmedCustomEndpointKeys = std::move(keys);
+		difference = CountCustomEndpointDifference(
+			before,
+			effectiveDataGuarded(),
+			beforeCustom,
+			customEndpointStateSnapshotGuarded());
+	}
+	for (const auto dcId : difference) {
+		_changed.fire_copy(dcId);
+	}
+	_confirmedCustomEndpointProfileChanged.fire({});
+	return true;
+}
+
+bool DcOptions::applyCustomEndpointCandidate(
+		CustomEndpointCandidate candidate) {
+	auto data = EndpointMap();
+	auto keys = PublicKeyMap();
+	if (candidate.profile
+		&& !PrepareCustomEndpointProfile(
+			*candidate.profile,
+			_environment,
+			data,
+			keys)) {
+		return false;
+	}
+
+	auto difference = std::vector<DcId>();
+	{
+		WriteLocker lock(this);
+		if (_customEndpointCandidate) {
+			return false;
+		}
+		const auto before = effectiveDataGuarded();
+		const auto beforeCustom = customEndpointStateSnapshotGuarded();
+		_customEndpointCandidate = std::move(candidate);
+		_customEndpointCandidateData = std::move(data);
+		_customEndpointCandidateKeys = std::move(keys);
+		difference = CountCustomEndpointDifference(
+			before,
+			effectiveDataGuarded(),
+			beforeCustom,
+			customEndpointStateSnapshotGuarded());
+	}
+	for (const auto dcId : difference) {
+		_changed.fire_copy(dcId);
+	}
+	return true;
+}
+
+bool DcOptions::promoteCustomEndpointCandidate() {
+	auto difference = std::vector<DcId>();
+	{
+		WriteLocker lock(this);
+		if (!_customEndpointCandidate) {
+			return false;
+		}
+		const auto before = effectiveDataGuarded();
+		const auto beforeCustom = customEndpointStateSnapshotGuarded();
+		auto candidate = base::take(_customEndpointCandidate);
+		_confirmedCustomEndpointProfile = std::move(candidate->profile);
+		_confirmedCustomEndpointData = base::take(
+			_customEndpointCandidateData);
+		_confirmedCustomEndpointKeys = base::take(
+			_customEndpointCandidateKeys);
+		difference = CountCustomEndpointDifference(
+			before,
+			effectiveDataGuarded(),
+			beforeCustom,
+			customEndpointStateSnapshotGuarded());
+	}
+	for (const auto dcId : difference) {
+		_changed.fire_copy(dcId);
+	}
+	_confirmedCustomEndpointProfileChanged.fire({});
+	return true;
+}
+
+bool DcOptions::rollbackCustomEndpointCandidate() {
+	auto difference = std::vector<DcId>();
+	{
+		WriteLocker lock(this);
+		if (!_customEndpointCandidate) {
+			return false;
+		}
+		const auto before = effectiveDataGuarded();
+		const auto beforeCustom = customEndpointStateSnapshotGuarded();
+		_customEndpointCandidate.reset();
+		_customEndpointCandidateData.clear();
+		_customEndpointCandidateKeys.clear();
+		difference = CountCustomEndpointDifference(
+			before,
+			effectiveDataGuarded(),
+			beforeCustom,
+			customEndpointStateSnapshotGuarded());
+	}
+	for (const auto dcId : difference) {
+		_changed.fire_copy(dcId);
+	}
+	return true;
+}
+
 std::vector<DcId> DcOptions::configEnumDcIds() const {
 	auto result = std::vector<DcId>();
 	{
@@ -600,11 +831,12 @@ DcType DcOptions::dcType(ShiftedDcId shiftedDcId) const {
 		return DcType::Temporary;
 	}
 	ReadLocker lock(this);
-	if (_cdnDcIds.find(BareDcId(shiftedDcId)) != _cdnDcIds.cend()) {
+	const auto dcId = BareDcId(shiftedDcId);
+	if (_cdnDcIds.find(dcId) != _cdnDcIds.cend()) {
 		return DcType::Cdn;
 	}
-	const auto dcId = BareDcId(shiftedDcId);
-	if (isMediaClusterDcId(shiftedDcId) && hasMediaOnlyOptionsFor(dcId)) {
+	if (isMediaClusterDcId(shiftedDcId)
+		&& hasMediaOnlyOptionsForGuarded(dcId)) {
 		return DcType::MediaCluster;
 	}
 	return DcType::Regular;
@@ -640,8 +872,7 @@ bool DcOptions::hasCDNKeysForDc(DcId dcId) const {
 RSAPublicKey DcOptions::getDcRSAKey(
 		DcId dcId,
 		const QVector<MTPlong> &fingerprints) const {
-	const auto findKey = [&](
-			const base::flat_map<uint64, RSAPublicKey> &keys) {
+	const auto findKey = [&](const PublicKeyMap &keys) {
 		for (const auto &fingerprint : fingerprints) {
 			const auto it = keys.find(static_cast<uint64>(fingerprint.v));
 			if (it != keys.cend()) {
@@ -650,11 +881,26 @@ RSAPublicKey DcOptions::getDcRSAKey(
 		}
 		return RSAPublicKey();
 	};
-	{
-		ReadLocker lock(this);
-		const auto it = _cdnPublicKeys.find(dcId);
-		if (it != _cdnPublicKeys.cend()) {
-			return findKey(it->second);
+
+	ReadLocker lock(this);
+	const auto bareDcId = BareDcId(dcId);
+	const auto cdnKeys = _cdnPublicKeys.find(bareDcId);
+	if (cdnKeys != _cdnPublicKeys.cend()) {
+		return findKey(cdnKeys->second);
+	}
+	if (_cdnDcIds.find(bareDcId) != _cdnDcIds.cend()) {
+		return findKey(_publicKeys);
+	}
+
+	const auto custom = customEndpointStateGuarded();
+	if (custom.data) {
+		const auto route = custom.data->find(bareDcId);
+		if (route != custom.data->cend()
+			&& custom.profile
+			&& !custom.profile->publicKeyPem.isEmpty()) {
+			return custom.keys
+				? findKey(*custom.keys)
+				: RSAPublicKey();
 		}
 	}
 	return findKey(_publicKeys);
@@ -668,11 +914,27 @@ auto DcOptions::lookup(
 	auto result = Variants();
 
 	ReadLocker lock(this);
-	const auto i = _data.find(dcId);
-	if (i == end(_data)) {
+	const auto base = _data.find(dcId);
+	const auto baseIsCdn = base != end(_data)
+		&& !base->second.empty()
+		&& isCdnDc(base->second.front().flags);
+	const auto custom = (type == DcType::Cdn || baseIsCdn)
+		? nullptr
+		: customEndpointDataGuarded();
+	auto endpoints = static_cast<const std::vector<Endpoint>*>(nullptr);
+	if (custom) {
+		const auto customEntry = custom->find(dcId);
+		if (customEntry != end(*custom)) {
+			endpoints = &customEntry->second;
+		}
+	}
+	if (!endpoints && base != end(_data)) {
+		endpoints = &base->second;
+	}
+	if (!endpoints) {
 		return result;
 	}
-	for (const auto &endpoint : i->second) {
+	for (const auto &endpoint : *endpoints) {
 		const auto flags = endpoint.flags;
 		if (type == DcType::Cdn && !(flags & Flag::f_cdn)) {
 			continue;
@@ -701,17 +963,91 @@ auto DcOptions::lookup(
 
 bool DcOptions::hasMediaOnlyOptionsFor(DcId dcId) const {
 	ReadLocker lock(this);
-	const auto i = _data.find(dcId);
-	if (i == end(_data)) {
+	return hasMediaOnlyOptionsForGuarded(dcId);
+}
+
+bool DcOptions::hasMediaOnlyOptionsForGuarded(DcId dcId) const {
+	const auto base = _data.find(dcId);
+	const auto baseIsCdn = base != end(_data)
+		&& !base->second.empty()
+		&& isCdnDc(base->second.front().flags);
+	const auto custom = baseIsCdn ? nullptr : customEndpointDataGuarded();
+	auto endpoints = static_cast<const std::vector<Endpoint>*>(nullptr);
+	if (custom) {
+		const auto customEntry = custom->find(dcId);
+		if (customEntry != end(*custom)) {
+			endpoints = &customEntry->second;
+		}
+	}
+	if (!endpoints && base != end(_data)) {
+		endpoints = &base->second;
+	}
+	if (!endpoints) {
 		return false;
 	}
-	for (const auto &endpoint : i->second) {
+	for (const auto &endpoint : *endpoints) {
 		const auto flags = endpoint.flags;
 		if (flags & Flag::f_media_only) {
 			return true;
 		}
 	}
 	return false;
+}
+
+DcOptions::CustomEndpointState DcOptions::customEndpointStateGuarded() const {
+	if (_customEndpointCandidate) {
+		if (!_customEndpointCandidate->profile) {
+			return {};
+		}
+		return {
+			&*_customEndpointCandidate->profile,
+			&_customEndpointCandidateData,
+			&_customEndpointCandidateKeys,
+		};
+	}
+	if (!_confirmedCustomEndpointProfile) {
+		return {};
+	}
+	return {
+		&*_confirmedCustomEndpointProfile,
+		&_confirmedCustomEndpointData,
+		&_confirmedCustomEndpointKeys,
+	};
+}
+
+auto DcOptions::customEndpointStateSnapshotGuarded() const
+-> CustomEndpointStateSnapshot {
+	auto result = CustomEndpointStateSnapshot();
+	const auto state = customEndpointStateGuarded();
+	if (state.profile) {
+		Assert(state.data != nullptr);
+		Assert(state.keys != nullptr);
+		result.data = *state.data;
+		result.publicKeyPem = state.profile->publicKeyPem;
+	}
+	return result;
+}
+
+const DcOptions::EndpointMap *DcOptions::customEndpointDataGuarded() const {
+	return customEndpointStateGuarded().data;
+}
+
+DcOptions::EndpointMap DcOptions::effectiveDataGuarded() const {
+	auto result = _data;
+	const auto custom = customEndpointDataGuarded();
+	if (!custom) {
+		return result;
+	}
+	for (const auto &item : *custom) {
+		const auto base = _data.find(item.first);
+		const auto baseIsCdn = base != end(_data)
+			&& !base->second.empty()
+			&& isCdnDc(base->second.front().flags);
+		if (!baseIsCdn) {
+			result[item.first] = item.second;
+		}
+	}
+	return result;
 }
 
 void DcOptions::FilterIfHasWithFlag(Variants &variants, Flag flag) {

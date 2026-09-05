@@ -2425,7 +2425,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		if (args.applyRich) {
 			args.applyRich(content->richResult());
 		} else {
-			args.apply(TextWithEntities(content->result()));
+			args.apply(TextWithEntities{ content->result() });
 		}
 		box->closeBox();
 	};
@@ -2434,7 +2434,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 			return;
 		}
 		args.send(
-			TextWithEntities(content->result()),
+			TextWithEntities{ content->result() },
 			options,
 			crl::guard(box, [=] {
 				box->closeBox();

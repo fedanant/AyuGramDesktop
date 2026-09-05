@@ -20,6 +20,7 @@ enum class StartResult : uchar;
 namespace MTP {
 class AuthKey;
 class Config;
+struct CustomEndpointProfile;
 } // namespace MTP
 
 namespace Main {
@@ -110,6 +111,8 @@ public:
 
 	void suggestMainDcId(MTP::DcId mainDcId);
 	void destroyStaleAuthorizationKeys();
+	[[nodiscard]] bool applyCustomEndpointProfileForLogin(
+		const MTP::CustomEndpointProfile &profile);
 
 	void setHandleLoginCode(Fn<void(QString)> callback);
 	void handleLoginCode(const QString &code) const;

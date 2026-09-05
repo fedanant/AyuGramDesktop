@@ -16,6 +16,7 @@ class PhonePartInput;
 class CountryCodeInput;
 class RoundButton;
 class FlatLabel;
+class LinkButton;
 } // namespace Ui
 
 namespace Intro {
@@ -44,9 +45,12 @@ public:
 
 protected:
 	void resizeEvent(QResizeEvent *e) override;
+	[[nodiscard]] int errorTop() const override;
 
 private:
+	void setupCustomEndpoint();
 	void setupQrLogin();
+	void updateLinksGeometry();
 	void phoneChanged();
 	void checkRequest();
 	void countryChanged();
@@ -65,6 +69,8 @@ private:
 	object_ptr<CountryInput> _country;
 	object_ptr<Ui::CountryCodeInput> _code;
 	object_ptr<Ui::PhonePartInput> _phone;
+	object_ptr<Ui::LinkButton> _endpointLink;
+	object_ptr<Ui::LinkButton> _qrLoginLink;
 
 	QString _sentPhone;
 	mtpRequestId _sentRequest = 0;

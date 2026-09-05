@@ -40,6 +40,7 @@ public:
 	// Thread-safe.
 	[[nodiscard]] DcId id() const;
 	[[nodiscard]] AuthKeyPtr getPersistentKey() const;
+	void setPersistentKey(AuthKeyPtr key);
 	[[nodiscard]] AuthKeyPtr getTemporaryKey(TemporaryKeyType type) const;
 	[[nodiscard]] CreatingKeyType acquireKeyCreation(DcType type);
 	bool releaseKeyCreationOnDone(
