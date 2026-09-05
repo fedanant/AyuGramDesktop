@@ -123,7 +123,6 @@ introPhone: InputField(introCountry) {
 introPhoneAuthLinksTop: 368px;
 introPhoneAuthLinksHorizontalSkip: 16px;
 introPhoneAuthLinksVerticalSkip: 8px;
-introCode: introCountry;
 introName: introCountry;
 introPassword: introCountry;
 introPasswordTop: 74px;

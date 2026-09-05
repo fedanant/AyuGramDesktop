@@ -165,10 +165,16 @@ void Controller::showAccount(
 		Intro::EnterPoint introPoint) {
 	Expects(isPrimary() || _id.account == account);
 
+	const auto prevAccount = _id.account;
 	const auto prevSession = maybeSession();
 	const auto prevSessionUniqueId = prevSession
 		? prevSession->uniqueId()
 		: 0;
+	const auto accountBeforeIntro = (prevAccount
+		&& prevAccount != account
+		&& prevAccount->sessionExists())
+		? prevAccount
+		: nullptr;
 	_accountLifetime.destroy();
 	_id.account = account;
 	Core::App().checkWindowId(this);
@@ -237,7 +243,10 @@ void Controller::showAccount(
 			session->updates().updateOnline(crl::now());
 		} else {
 			sideBarChanged();
-			setupIntro(introPoint, std::move(oldContentCache));
+			setupIntro(
+				introPoint,
+				accountBeforeIntro,
+				std::move(oldContentCache));
 			_widget.updateGlobalMenu();
 		}
 
@@ -416,8 +425,12 @@ void Controller::clearSetupEmailLock() {
 
 void Controller::setupIntro(
 		Intro::EnterPoint point,
+		Main::Account *accountBeforeIntro,
 		QPixmap oldContentCache) {
-	_widget.setupIntro(point, std::move(oldContentCache));
+	_widget.setupIntro(
+		point,
+		accountBeforeIntro,
+		std::move(oldContentCache));
 }
 
 void Controller::setupMain(
@@ -482,8 +495,16 @@ void Controller::hideSettingsAndLayer(anim::type animated) {
 	_widget.ui_hideSettingsAndLayer(animated);
 }
 
+bool Controller::closeLayerByBackButton() {
+	return _widget.closeLayerByBackButton();
+}
+
 bool Controller::isLayerShown() const {
 	return _widget.ui_isLayerShown();
+}
+
+rpl::producer<bool> Controller::boxShownValue() const {
+	return _widget.ui_boxShownValue();
 }
 
 void Controller::sideBarChanged() {
