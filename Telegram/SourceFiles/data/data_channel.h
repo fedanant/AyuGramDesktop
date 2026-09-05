@@ -91,6 +91,7 @@ enum class ChannelDataFlag : uint64 {
 	CommunityCollapsed = (1ULL << 47),
 
 	AyuNoForwards = (1ULL << 63),
+	HasWelcomeMessages = (1ULL << 48),
 };
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
@@ -296,6 +297,9 @@ public:
 	}
 	[[nodiscard]] bool starsPerMessageKnown() const {
 		return flags() & Flag::StarsPerMessageKnown;
+	}
+	[[nodiscard]] bool hasWelcomeMessages() const {
+		return flags() & Flag::HasWelcomeMessages;
 	}
 	[[nodiscard]] bool useSubsectionTabs() const;
 

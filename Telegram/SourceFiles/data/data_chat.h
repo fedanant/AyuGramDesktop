@@ -25,6 +25,7 @@ enum class ChatDataFlag {
 	NoForwards = (1 << 8),
 
 	AyuNoForwards = (1 << 31),
+	HasWelcomeMessages = (1 << 9),
 };
 inline constexpr bool is_flag_type(ChatDataFlag) { return true; };
 using ChatDataFlags = base::flags<ChatDataFlag>;
@@ -94,6 +95,9 @@ public:
 	}
 	[[nodiscard]] bool isMigrated() const {
 		return (_migratedTo != nullptr);
+	}
+	[[nodiscard]] bool hasWelcomeMessages() const {
+		return flags() & ChatDataFlag::HasWelcomeMessages;
 	}
 
 	[[nodiscard]] ChatAdminRightsInfo defaultAdminRights(
