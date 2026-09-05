@@ -31,6 +31,12 @@ jobs:
     name: Build Windows (x64)
     runs-on: windows-2022
     timeout-minutes: 360
+    env:
+      VSLANG: "1033"
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_VERSION: ayugram-windows-v1
+      SCCACHE_IDLE_TIMEOUT: "0"
+      SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
 
     steps:
       - name: Check out sources
@@ -82,14 +88,33 @@ jobs:
             ${{ github.workspace }}/../ThirdParty
           key: ${{ steps.windows-libraries-cache.outputs.cache-primary-key }}
 
+      - name: Set up compilation cache
+        id: sccache
+        uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
+      - name: Start compilation cache
+        shell: pwsh
+        run: |
+          ninja --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          sccache --start-server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          sccache --zero-stats
+
       - name: Configure Release build
         shell: cmd
         working-directory: Telegram
-        run: configure.bat x64 -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
+        run: configure.bat -G "Ninja Multi-Config" -D AYUGRAM_ENABLE_COMPILATION_CACHE=ON -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627
 
       - name: Build AyuGram
         shell: cmd
-        run: cmake --build out --config Release --target Telegram -- /m:2
+        run: cmake --build out --config Release --target Telegram --parallel %NUMBER_OF_PROCESSORS%
+
+      - name: Report compilation cache statistics
+        if: always() && steps.sccache.outcome == 'success'
+        run: sccache --show-stats
 
       - name: Package Windows artifacts
         shell: pwsh
@@ -114,6 +139,11 @@ jobs:
     name: Build macOS (DMG)
     runs-on: macos-14
     timeout-minutes: 360
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_VERSION: ayugram-macos-v1
+      SCCACHE_IDLE_TIMEOUT: "0"
+      SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
 
     steps:
       - name: Check out sources
@@ -179,13 +209,28 @@ jobs:
             ${{ github.workspace }}/../ThirdParty
           key: ${{ steps.macos-libraries-cache.outputs.cache-primary-key }}
 
+      - name: Set up compilation cache
+        id: sccache
+        uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.17.0
+
+      - name: Start compilation cache
+        run: |
+          sccache --start-server
+          sccache --zero-stats
+
       - name: Configure Release build
         run: |
-          ./Telegram/configure.sh -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+          ./Telegram/configure.sh -D AYUGRAM_ENABLE_COMPILATION_CACHE=ON -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
 
       - name: Build AyuGram
         run: |
           cmake --build out --config Release --target Telegram -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Report compilation cache statistics
+        if: always() && steps.sccache.outcome == 'success'
+        run: sccache --show-stats
 
       - name: Package macOS DMG
         run: |
