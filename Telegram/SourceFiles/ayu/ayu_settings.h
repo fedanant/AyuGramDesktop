@@ -328,7 +328,6 @@ public:
 	[[nodiscard]] bool showSReadToggleInDrawer() const { return _showSReadToggleInDrawer.current(); }
 	[[nodiscard]] bool showNightModeToggleInDrawer() const { return _showNightModeToggleInDrawer.current(); }
 	[[nodiscard]] bool showGhostToggleInDrawer() const { return _showGhostToggleInDrawer.current(); }
-	[[nodiscard]] bool showStreamerToggleInDrawer() const { return _showStreamerToggleInDrawer.current(); }
 	[[nodiscard]] bool showGhostToggleInTray() const { return _showGhostToggleInTray.current(); }
 	[[nodiscard]] bool showStreamerToggleInTray() const { return _showStreamerToggleInTray.current(); }
 	[[nodiscard]] const QString &monoFont() const { return _monoFont.current(); }
@@ -415,7 +414,6 @@ public:
 	void setShowSReadToggleInDrawer(bool val);
 	void setShowNightModeToggleInDrawer(bool val);
 	void setShowGhostToggleInDrawer(bool val);
-	void setShowStreamerToggleInDrawer(bool val);
 	void setShowGhostToggleInTray(bool val);
 	void setShowStreamerToggleInTray(bool val);
 	void setMonoFont(const QString &val);
@@ -565,8 +563,6 @@ public:
 	[[nodiscard]] rpl::producer<bool> showNightModeToggleInDrawerChanges() const { return _showNightModeToggleInDrawer.changes(); }
 	[[nodiscard]] rpl::producer<bool> showGhostToggleInDrawerValue() const { return _showGhostToggleInDrawer.value(); }
 	[[nodiscard]] rpl::producer<bool> showGhostToggleInDrawerChanges() const { return _showGhostToggleInDrawer.changes(); }
-	[[nodiscard]] rpl::producer<bool> showStreamerToggleInDrawerValue() const { return _showStreamerToggleInDrawer.value(); }
-	[[nodiscard]] rpl::producer<bool> showStreamerToggleInDrawerChanges() const { return _showStreamerToggleInDrawer.changes(); }
 	[[nodiscard]] rpl::producer<bool> showGhostToggleInTrayValue() const { return _showGhostToggleInTray.value(); }
 	[[nodiscard]] rpl::producer<bool> showGhostToggleInTrayChanges() const { return _showGhostToggleInTray.changes(); }
 	[[nodiscard]] rpl::producer<bool> showStreamerToggleInTrayValue() const { return _showStreamerToggleInTray.value(); }
@@ -685,7 +681,6 @@ private:
 	rpl::variable<bool> _showSReadToggleInDrawer = true;
 	rpl::variable<bool> _showNightModeToggleInDrawer = true;
 	rpl::variable<bool> _showGhostToggleInDrawer = true;
-	rpl::variable<bool> _showStreamerToggleInDrawer = false;
 	rpl::variable<bool> _showGhostToggleInTray = true;
 	rpl::variable<bool> _showStreamerToggleInTray = false;
 	rpl::variable<bool> _hidePremiumStatuses = false;

@@ -910,20 +910,17 @@ void MainMenu::setupMenu() {
 			ghostModeToggle->lifetime());
 	}
 
-	if (settings.showStreamerToggleInDrawer()) {
-		const auto streamerModeToggle = addAction(
-			tr::ayu_StreamerModeToggle(),
-			{&st::ayuStreamerModeMenuIcon}
-		)->toggleOn(AyuSettings::getInstance().streamerModeValue());
+#if defined Q_OS_WIN || defined Q_OS_MAC
+	const auto streamerModeToggle = addAction(
+		tr::ayu_StreamerModeToggle(),
+		{ &st::ayuStreamerModeMenuIcon }
+	)->toggleOn(AyuSettings::getInstance().streamerModeValue());
 
-		streamerModeToggle->toggledChanges(
-		) | rpl::on_next(
-			[=](bool enabled)
-			{
-				AyuSettings::getInstance().setStreamerMode(enabled);
-			},
-			streamerModeToggle->lifetime());
-	}
+	streamerModeToggle->toggledChanges(
+	) | rpl::on_next([](bool enabled) {
+		AyuSettings::getInstance().setStreamerMode(enabled);
+	}, streamerModeToggle->lifetime());
+#endif
 }
 
 void MainMenu::resizeEvent(QResizeEvent *e) {

@@ -315,6 +315,7 @@ void Application::run() {
 	_notifications = std::make_unique<Window::Notifications::System>();
 
 	startLocalStorage();
+	AyuSettings::load();
 
 	style::SetCustomFont(settings().customFontFamily());
 	style::internal::StartFonts();

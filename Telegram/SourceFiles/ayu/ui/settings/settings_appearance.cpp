@@ -361,16 +361,6 @@ void BuildDrawerElements(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 		.icon = { &st::ayuGhostIcon },
 	});
 
-#if defined Q_OS_WIN || defined Q_OS_MAC
-	ayu.addSettingToggle({
-		.id = u"ayu/showStreamerToggleInDrawer"_q,
-		.title = tr::ayu_StreamerModeToggle(),
-		.getter = &AyuSettings::showStreamerToggleInDrawer,
-		.setter = &AyuSettings::setShowStreamerToggleInDrawer,
-		.icon = { &st::ayuStreamerModeMenuIcon },
-	});
-#endif
-
 	builder.addSkip();
 }
 
