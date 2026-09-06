@@ -552,32 +552,29 @@ HistoryItem::HistoryItem(
 		createComponents(data);
 		if (media) {
 			setMedia(*media);
-			if (checked == MediaCheckResult::HasUnsupportedTimeToLive) {
-				media->match(
-					[&](const MTPDmessageMediaPhoto &media)
-					{
-						if (!data.is_media_unread()) {
-							createServiceFromMtp(data);
-							skipSetText = true;
-						}
-
-						const auto time = media.vttl_seconds()->v;
-						setAyuHint(formatTTL(time, false));
-						_unsupportedTTL = time;
-					},
-					[&](const MTPDmessageMediaDocument &media)
-					{
-						if (!data.is_media_unread()) {
-							createServiceFromMtp(data);
-							skipSetText = true;
-						}
-
-						const auto time = media.vttl_seconds()->v;
-						setAyuHint(formatTTL(time, true));
-						_unsupportedTTL = time;
-					},
-					[](const auto &) {});
-			}
+			media->match([&](const MTPDmessageMediaPhoto &media) {
+				const auto ttl = media.vttl_seconds();
+				if (!ttl) {
+					return;
+				}
+				if (!data.is_media_unread()) {
+					createServiceFromMtp(data);
+					skipSetText = true;
+				}
+				setAyuHint(formatTTL(ttl->v, false));
+				_unsupportedTTL = ttl->v;
+			}, [&](const MTPDmessageMediaDocument &media) {
+				const auto ttl = media.vttl_seconds();
+				if (!ttl || !media.is_video()) {
+					return;
+				}
+				if (!data.is_media_unread()) {
+					createServiceFromMtp(data);
+					skipSetText = true;
+				}
+				setAyuHint(formatTTL(ttl->v, true));
+				_unsupportedTTL = ttl->v;
+			}, [](const auto &) {});
 		}
 		if (const auto media = _media.get()) {
 			if (media->ttlSeconds()

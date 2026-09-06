@@ -64,13 +64,25 @@ jobs:
           maximum-size: 32GB
           disk-root: "C:"
 
+      - name: Resolve dependency cache paths
+        id: dependency-cache-paths
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve().parent
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"libraries={root / 'Libraries'}", file=output)
+              print(f"third-party={root / 'ThirdParty'}", file=output)
+
       - name: Restore Windows Libraries & ThirdParty
         id: windows-libraries-cache
         uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ github.workspace }}/../Libraries
-            ${{ github.workspace }}/../ThirdParty
+            ${{ steps.dependency-cache-paths.outputs.libraries }}
+            ${{ steps.dependency-cache-paths.outputs.third-party }}
           key: libs-win-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/prepare/prepare.py') }}
           restore-keys: |
             libs-win-
@@ -84,8 +96,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ${{ github.workspace }}/../Libraries
-            ${{ github.workspace }}/../ThirdParty
+            ${{ steps.dependency-cache-paths.outputs.libraries }}
+            ${{ steps.dependency-cache-paths.outputs.third-party }}
           key: ${{ steps.windows-libraries-cache.outputs.cache-primary-key }}
 
       - name: Set up compilation cache
@@ -184,13 +196,25 @@ jobs:
           xcodebuild -version
           df -h "$GITHUB_WORKSPACE"
 
+      - name: Resolve dependency cache paths
+        id: dependency-cache-paths
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve().parent
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"libraries={root / 'Libraries'}", file=output)
+              print(f"third-party={root / 'ThirdParty'}", file=output)
+
       - name: Restore macOS Libraries & ThirdParty
         id: macos-libraries-cache
         uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ github.workspace }}/../Libraries
-            ${{ github.workspace }}/../ThirdParty
+            ${{ steps.dependency-cache-paths.outputs.libraries }}
+            ${{ steps.dependency-cache-paths.outputs.third-party }}
           key: libs-mac-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/prepare/prepare.py') }}
           restore-keys: |
             libs-mac-
@@ -205,8 +229,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            ${{ github.workspace }}/../Libraries
-            ${{ github.workspace }}/../ThirdParty
+            ${{ steps.dependency-cache-paths.outputs.libraries }}
+            ${{ steps.dependency-cache-paths.outputs.third-party }}
           key: ${{ steps.macos-libraries-cache.outputs.cache-primary-key }}
 
       - name: Set up compilation cache

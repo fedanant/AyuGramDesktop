@@ -6,21 +6,16 @@ endif()
 
 find_program(AYUGRAM_SCCACHE_EXECUTABLE NAMES sccache REQUIRED)
 
-if (CMAKE_GENERATOR STREQUAL "Xcode")
-    set(CMAKE_XCODE_ATTRIBUTE_C_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}")
-    set(CMAKE_XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES NO)
-    set(CMAKE_XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE NO)
-    set(CMAKE_XCODE_ATTRIBUTE_CLANG_USE_RESPONSE_FILE NO)
-elseif (CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
+if (CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
     set(CMAKE_C_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}")
     set(CMAKE_CXX_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}")
     set(CMAKE_OBJC_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}")
     set(CMAKE_OBJCXX_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}")
-else()
+elseif (NOT CMAKE_GENERATOR STREQUAL "Xcode")
     message(FATAL_ERROR "Compilation caching requires Ninja, Makefiles, or Xcode.")
 endif()
 
-function(ayugram_cache_msvc_targets directory)
+function(ayugram_cache_targets directory)
     get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach (target IN LISTS targets)
         get_target_property(target_type ${target} TYPE)
@@ -28,23 +23,32 @@ function(ayugram_cache_msvc_targets directory)
             continue()
         endif()
 
-        set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
-        get_target_property(headers ${target} PRECOMPILE_HEADERS)
-        if (headers)
-            # sccache cannot cache MSVC PCH use; retain the headers as forced includes.
-            set_property(TARGET ${target} PROPERTY DISABLE_PRECOMPILE_HEADERS ON)
-            foreach (header IN LISTS headers)
-                target_compile_options(${target} PRIVATE "$<$<BOOL:${header}>:/FI${header}>")
-            endforeach()
+        if (CMAKE_GENERATOR STREQUAL "Xcode")
+            set_target_properties(${target} PROPERTIES
+                XCODE_ATTRIBUTE_C_COMPILER_LAUNCHER "${AYUGRAM_SCCACHE_EXECUTABLE}"
+                XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES NO
+                XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE NO
+                XCODE_ATTRIBUTE_CLANG_USE_RESPONSE_FILE NO
+            )
+        elseif (MSVC)
+            set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+            get_target_property(headers ${target} PRECOMPILE_HEADERS)
+            if (headers)
+                # sccache cannot cache MSVC PCH use; retain the headers as forced includes.
+                set_property(TARGET ${target} PROPERTY DISABLE_PRECOMPILE_HEADERS ON)
+                foreach (header IN LISTS headers)
+                    target_compile_options(${target} PRIVATE "$<$<BOOL:${header}>:/FI${header}>")
+                endforeach()
+            endif()
         endif()
     endforeach()
 
     get_property(subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
     foreach (subdirectory IN LISTS subdirectories)
-        ayugram_cache_msvc_targets("${subdirectory}")
+        ayugram_cache_targets("${subdirectory}")
     endforeach()
 endfunction()
 
-if (MSVC)
-    cmake_language(DEFER CALL ayugram_cache_msvc_targets "${CMAKE_CURRENT_SOURCE_DIR}")
+if (MSVC OR CMAKE_GENERATOR STREQUAL "Xcode")
+    cmake_language(DEFER CALL ayugram_cache_targets "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
