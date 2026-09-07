@@ -1,0 +1,79 @@
+name: TG WS Proxy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/dependabot.yml
+      - .github/workflows/tg-ws-proxy.yml
+      - .github/scripts/tg_ws_proxy_smoke.py
+      - .gitmodules
+      - Telegram/ThirdParty/tg-ws-proxy
+      - Telegram/ThirdParty/tg-ws-proxy/**
+      - Telegram/build/tg_ws_proxy/**
+      - Telegram/SourceFiles/ayu/tg_ws_proxy.*
+      - Telegram/CMakeLists.txt
+  pull_request:
+    paths:
+      - .github/dependabot.yml
+      - .github/workflows/tg-ws-proxy.yml
+      - .github/scripts/tg_ws_proxy_smoke.py
+      - .gitmodules
+      - Telegram/ThirdParty/tg-ws-proxy
+      - Telegram/ThirdParty/tg-ws-proxy/**
+      - Telegram/build/tg_ws_proxy/**
+      - Telegram/SourceFiles/ayu/tg_ws_proxy.*
+      - Telegram/CMakeLists.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tg-ws-proxy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Windows packaged proxy
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONNOUSERSITE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize proxy submodule
+        run: git submodule update --init --depth=1 -- Telegram/ThirdParty/tg-ws-proxy
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.10'
+          architecture: x64
+
+      - name: Build packaged proxy
+        run: |
+          python Telegram/build/tg_ws_proxy/build.py `
+            --source Telegram/ThirdParty/tg-ws-proxy `
+            --build "$env:RUNNER_TEMP/tg-ws-proxy/build" `
+            --output "$env:RUNNER_TEMP/tg-ws-proxy/AyuWsProxy.exe" `
+            --runner Telegram/build/tg_ws_proxy/runner.py
+
+      - name: Run upstream tests
+        working-directory: Telegram/ThirdParty/tg-ws-proxy
+        run: |
+          & "$env:RUNNER_TEMP/tg-ws-proxy/build/venv/Scripts/python.exe" -m unittest discover -s tests -v
+
+      - name: Test packaged proxy
+        run: |
+          python .github/scripts/tg_ws_proxy_smoke.py `
+            --executable "$env:RUNNER_TEMP/tg-ws-proxy/AyuWsProxy.exe"
