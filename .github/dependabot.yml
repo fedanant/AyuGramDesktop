@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: gitsubmodule
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:00"
+      timezone: Europe/Moscow
+    allow:
+      - dependency-name: Telegram/ThirdParty/tg-ws-proxy
+    open-pull-requests-limit: 1
