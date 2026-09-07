@@ -241,7 +241,7 @@ jobs:
     env:
       MAC_ARCH: ${{ matrix.arch }}
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_VERSION: ayugram-macos-v1
+      SCCACHE_GHA_VERSION: ayugram-macos-v2
       SCCACHE_IDLE_TIMEOUT: "0"
       SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
 
@@ -301,7 +301,9 @@ jobs:
             -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 \
             -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
-            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="" \
+            -D CMAKE_C_FLAGS="-Xclang -fno-pch-timestamp" \
+            -D CMAKE_CXX_FLAGS="-Xclang -fno-pch-timestamp"
 
       - name: Build AyuGram
         run: |

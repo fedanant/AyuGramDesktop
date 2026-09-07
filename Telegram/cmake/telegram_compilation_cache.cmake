@@ -15,6 +15,12 @@ elseif (NOT CMAKE_GENERATOR STREQUAL "Xcode")
     message(FATAL_ERROR "Compilation caching requires Ninja, Makefiles, or Xcode.")
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang" OR CMAKE_GENERATOR STREQUAL "Xcode")
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:SHELL:-Xclang -fno-pch-timestamp>"
+    )
+endif()
+
 function(ayugram_cache_targets directory)
     get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach (target IN LISTS targets)
@@ -29,6 +35,8 @@ function(ayugram_cache_targets directory)
                 XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES NO
                 XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE NO
                 XCODE_ATTRIBUTE_CLANG_USE_RESPONSE_FILE NO
+                XCODE_ATTRIBUTE_OTHER_CFLAGS "$(inherited) -Xclang -fno-pch-timestamp"
+                XCODE_ATTRIBUTE_OTHER_CPLUSPLUSFLAGS "$(inherited) -Xclang -fno-pch-timestamp"
             )
         elseif (MSVC)
             set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
