@@ -13,6 +13,16 @@ on:
         required: false
         type: boolean
         default: false
+      macos_only:
+        description: 'Build only macOS'
+        required: false
+        type: boolean
+        default: false
+      publish_release:
+        description: 'Publish build artifacts to a GitHub Release'
+        required: false
+        type: boolean
+        default: true
   push:
     branches:
       - main
@@ -29,6 +39,7 @@ concurrency:
 jobs:
   build-windows:
     name: Build Windows (x64)
+    if: github.event_name != 'workflow_dispatch' || !inputs.macos_only
     runs-on: windows-2022
     timeout-minutes: 360
     env:
@@ -147,11 +158,88 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  build-macos:
-    name: Build macOS (DMG)
+  prepare-macos:
+    name: Prepare macOS dependencies
     runs-on: macos-14
     timeout-minutes: 360
+    outputs:
+      toolchain: ${{ steps.setup.outputs.toolchain }}
+      build-root: ${{ steps.paths.outputs.build-root }}
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up macOS build tools
+        id: setup
+        uses: ./.github/actions/setup-macos-build
+
+      - name: Resolve dependency paths
+        id: paths
+        run: echo "build-root=$(cd "$GITHUB_WORKSPACE/.." && pwd -P)" >> "$GITHUB_OUTPUT"
+
+      - name: Test universal bundle assembly
+        run: python3 -m unittest discover -s .github/scripts -p 'test_merge_macos_apps.py'
+
+      - name: Restore prepared dependency archive
+        id: dependencies
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/macos-dependencies.tar.zst
+          key: macos-prepared-v2-${{ runner.arch }}-${{ steps.setup.outputs.toolchain }}-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/qt_version.py', '.github/actions/setup-macos-build/action.yml', '.github/workflows/release.yml') }}
+
+      - name: Prepare libraries
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        run: ./Telegram/build/prepare/mac.sh
+
+      - name: Archive prepared dependencies
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        run: |
+          # Qt is consumed from Libraries/local/Qt-*, not its source/build
+          # tree. Keep installed files, symlinks and executable permissions;
+          # omit clone metadata and preparation stamps from this build-only
+          # archive. Consumers configure directly and never run prepare.py.
+          gtar -C "$GITHUB_WORKSPACE/.." \
+            --exclude='.git' \
+            --exclude='Libraries/qt_*' \
+            --exclude='Libraries/cache_keys' \
+            --exclude='ThirdParty/cache_keys' \
+            -I 'zstd -T0 -3' \
+            -cf "$RUNNER_TEMP/macos-dependencies.tar.zst" Libraries ThirdParty
+          ls -lh "$RUNNER_TEMP/macos-dependencies.tar.zst"
+
+      - name: Save prepared dependency archive
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/macos-dependencies.tar.zst
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+
+      - name: Upload dependencies for this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-macOS-dependencies
+          path: ${{ runner.temp }}/macos-dependencies.tar.zst
+          compression-level: 0
+          retention-days: 3
+          overwrite: true
+          if-no-files-found: error
+
+  build-macos-arch:
+    name: Build macOS (${{ matrix.arch }})
+    needs: prepare-macos
+    runs-on: macos-14
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
     env:
+      MAC_ARCH: ${{ matrix.arch }}
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_VERSION: ayugram-macos-v1
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -163,75 +251,33 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up macOS build tools
+        id: setup
+        uses: ./.github/actions/setup-macos-build
+
+      - name: Check dependency toolchain and installation prefix
+        env:
+          EXPECTED_TOOLCHAIN: ${{ needs.prepare-macos.outputs.toolchain }}
+          ACTUAL_TOOLCHAIN: ${{ steps.setup.outputs.toolchain }}
+          EXPECTED_BUILD_ROOT: ${{ needs.prepare-macos.outputs.build-root }}
+        run: |
+          test "$ACTUAL_TOOLCHAIN" = "$EXPECTED_TOOLCHAIN"
+          test "$(cd "$GITHUB_WORKSPACE/.." && pwd -P)" = "$EXPECTED_BUILD_ROOT"
+
+      - name: Download prepared dependencies
+        uses: actions/download-artifact@v4
         with:
-          python-version: '3.10'
+          name: AyuGram-macOS-dependencies
+          path: ${{ runner.temp }}
+
+      - name: Extract prepared dependencies
+        run: |
+          gtar -C "$GITHUB_WORKSPACE/.." -I zstd -xf "$RUNNER_TEMP/macos-dependencies.tar.zst"
+          rm -- "$RUNNER_TEMP/macos-dependencies.tar.zst"
+          df -h "$GITHUB_WORKSPACE"
 
       - name: Patch macOS Swift files
         run: python3 Telegram/build/patch_mac.py
-
-      - name: Install Homebrew dependencies
-        run: |
-          brew install automake libtool cmake wget pkg-config gnu-tar ninja nasm meson create-dmg
-
-      - name: Select Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-      - name: Free macOS build disk space
-        run: |
-          df -h "$GITHUB_WORKSPACE"
-          selected_developer_dir="$(xcode-select -p)"
-          selected_xcode="$(cd "$selected_developer_dir/../.." && pwd -P)"
-          test -x "$selected_xcode/Contents/Developer/usr/bin/xcodebuild"
-
-          for xcode in /Applications/Xcode*.app; do
-            if [[ -d "$xcode" && ! -L "$xcode" && ! "$xcode" -ef "$selected_xcode" ]]; then
-              echo "Removing unused Xcode: $xcode"
-              sudo rm -rf -- "$xcode"
-            fi
-          done
-
-          xcodebuild -version
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Resolve dependency cache paths
-        id: dependency-cache-paths
-        shell: python
-        run: |
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ["GITHUB_WORKSPACE"]).resolve().parent
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              print(f"libraries={root / 'Libraries'}", file=output)
-              print(f"third-party={root / 'ThirdParty'}", file=output)
-
-      - name: Restore macOS Libraries & ThirdParty
-        id: macos-libraries-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ${{ steps.dependency-cache-paths.outputs.libraries }}
-            ${{ steps.dependency-cache-paths.outputs.third-party }}
-          key: libs-mac-${{ hashFiles('Telegram/build/prepare/**', 'Telegram/build/prepare/prepare.py') }}
-          restore-keys: |
-            libs-mac-
-
-      - name: Prepare libraries
-        run: |
-          ./Telegram/build/prepare/mac.sh
-          df -h "$GITHUB_WORKSPACE"
-
-      - name: Save macOS Libraries & ThirdParty
-        if: steps.macos-libraries-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ steps.dependency-cache-paths.outputs.libraries }}
-            ${{ steps.dependency-cache-paths.outputs.third-party }}
-          key: ${{ steps.macos-libraries-cache.outputs.cache-primary-key }}
 
       - name: Set up compilation cache
         id: sccache
@@ -246,44 +292,107 @@ jobs:
 
       - name: Configure Release build
         run: |
-          ./Telegram/configure.sh -D AYUGRAM_ENABLE_COMPILATION_CACHE=ON -D TDESKTOP_API_ID=2040 -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+          ./Telegram/configure.sh \
+            -D CMAKE_CONFIGURATION_TYPES=Release \
+            -D CMAKE_OSX_ARCHITECTURES="$MAC_ARCH" \
+            -D DESKTOP_APP_MAC_ARCH="$MAC_ARCH" \
+            -D AYUGRAM_ENABLE_COMPILATION_CACHE=ON \
+            -D TDESKTOP_API_ID=2040 \
+            -D TDESKTOP_API_HASH=b18441a1ff607e10a989891a5462e627 \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
 
       - name: Build AyuGram
         run: |
-          cmake --build out --config Release --target Telegram -- CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          cmake --build out --config Release --target Telegram \
+            --parallel "$(sysctl -n hw.logicalcpu)" -- \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
       - name: Report compilation cache statistics
         if: always() && steps.sccache.outcome == 'success'
         run: sccache --show-stats
 
+      - name: Archive app bundle
+        run: |
+          test -x out/Release/AyuGram.app/Contents/MacOS/AyuGram
+          xcrun lipo out/Release/AyuGram.app/Contents/MacOS/AyuGram -verify_arch "$MAC_ARCH"
+          mkdir -p dist
+          tar -C out/Release -czf "dist/AyuGram-$MAC_ARCH.app.tar.gz" AyuGram.app
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-macOS-${{ matrix.arch }}
+          path: dist/AyuGram-${{ matrix.arch }}.app.tar.gz
+          compression-level: 0
+          retention-days: 3
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Report macOS disk usage
+        if: always()
+        run: df -h "$GITHUB_WORKSPACE"
+
+  build-macos:
+    name: Package universal macOS DMG
+    needs: build-macos-arch
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Select Xcode and install packaging tools
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          brew install create-dmg
+
+      - name: Download Intel app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: AyuGram-macOS-x86_64
+          path: bundles
+
+      - name: Download Apple Silicon app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: AyuGram-macOS-arm64
+          path: bundles
+
+      - name: Assemble universal app
+        run: |
+          for arch in x86_64 arm64; do
+            mkdir -p "bundles/$arch"
+            tar -xzf "bundles/AyuGram-$arch.app.tar.gz" -C "bundles/$arch"
+          done
+          mkdir -p dist
+          python3 .github/scripts/merge_macos_apps.py \
+            bundles/arm64/AyuGram.app bundles/x86_64/AyuGram.app dist/AyuGram.app
+
       - name: Package macOS DMG
         run: |
-          APP_PATH=$(find out -name "AyuGram.app" -type d | head -n 1)
-          echo "Found app at: $APP_PATH"
-          if [ -z "$APP_PATH" ]; then
-            echo "Error: AyuGram.app not found!"
-            find out -maxdepth 4
-            exit 1
-          fi
-
-          mkdir -p dist
-          if command -v create-dmg &> /dev/null; then
-            create-dmg \
-              --volname "AyuGram" \
-              --window-pos 200 120 \
-              --window-size 600 400 \
-              --icon-size 100 \
-              --icon "AyuGram.app" 175 120 \
-              --hide-extension "AyuGram.app" \
-              --app-drop-link 425 120 \
-              "dist/AyuGram-macOS.dmg" \
-              "$APP_PATH" || {
-                echo "create-dmg exited with warning/code $?, falling back to hdiutil..."
-                hdiutil create -volname "AyuGram" -srcfolder "$APP_PATH" -ov -format UDZO "dist/AyuGram-macOS.dmg"
-              }
-          else
-            hdiutil create -volname "AyuGram" -srcfolder "$APP_PATH" -ov -format UDZO "dist/AyuGram-macOS.dmg"
-          fi
+          APP_PATH="$GITHUB_WORKSPACE/dist/AyuGram.app"
+          create-dmg \
+            --volname "AyuGram" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "AyuGram.app" 175 120 \
+            --hide-extension "AyuGram.app" \
+            --app-drop-link 425 120 \
+            "dist/AyuGram-macOS.dmg" \
+            "$APP_PATH" || {
+              rm -f -- dist/AyuGram-macOS.dmg
+              hdiutil create -volname "AyuGram" -srcfolder "$APP_PATH" -ov -format UDZO "dist/AyuGram-macOS.dmg"
+            }
+          hdiutil verify dist/AyuGram-macOS.dmg
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
@@ -292,20 +401,13 @@ jobs:
           path: dist/AyuGram-macOS.dmg
           if-no-files-found: error
 
-      - name: Report macOS disk usage
-        if: always()
-        run: |
-          df -h "$GITHUB_WORKSPACE"
-          for path in "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/../Libraries" "$GITHUB_WORKSPACE/../ThirdParty"; do
-            if [[ -d "$path" ]]; then
-              du -sh "$path"
-            fi
-          done
-
   publish-release:
     name: Publish GitHub Release
     needs: [build-windows, build-macos]
-    if: always() && !cancelled() && (needs.build-windows.result == 'success' || needs.build-macos.result == 'success')
+    if: >-
+      always() && !cancelled()
+      && (github.event_name != 'workflow_dispatch' || inputs.publish_release)
+      && (needs.build-windows.result == 'success' || needs.build-macos.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -1,0 +1,38 @@
+name: Set up macOS build tools
+description: Select one Xcode toolchain and make room for the macOS dependencies.
+outputs:
+  toolchain:
+    description: Fingerprint of the Xcode and macOS SDK used by this job.
+    value: ${{ steps.xcode.outputs.toolchain }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Select Xcode and free disk space
+      id: xcode
+      shell: bash
+      run: |
+        sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+        selected_developer_dir="$(xcode-select -p)"
+        selected_xcode="$(cd "$selected_developer_dir/../.." && pwd -P)"
+        test -x "$selected_xcode/Contents/Developer/usr/bin/xcodebuild"
+
+        for xcode in /Applications/Xcode*.app; do
+          if [[ -d "$xcode" && ! -L "$xcode" && ! "$xcode" -ef "$selected_xcode" ]]; then
+            echo "Removing unused Xcode: $xcode"
+            sudo rm -rf -- "$xcode"
+          fi
+        done
+
+        xcodebuild -version
+        toolchain=$( { xcodebuild -version; xcrun --sdk macosx --show-sdk-build-version; } | shasum -a 256 | cut -d ' ' -f 1)
+        echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+        df -h "$GITHUB_WORKSPACE"
+
+    - name: Install Homebrew dependencies
+      shell: bash
+      run: brew install automake libtool cmake wget pkg-config gnu-tar ninja nasm meson zstd
