@@ -34,6 +34,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_widget.h"
 #include "iv/editor/iv_editor_window.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "menu/menu_checked_action.h"
 #include "menu/menu_send_details.h"
 #include "styles/style_settings.h"
