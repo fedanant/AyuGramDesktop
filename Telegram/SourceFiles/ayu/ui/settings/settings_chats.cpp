@@ -8,16 +8,20 @@
 
 #include "lang_auto.h"
 #include "ayu/ayu_settings.h"
+#include "ayu/ui/boxes/ai_provider_box.h"
 #include "ayu/ui/boxes/edit_mark_box.h"
 #include "ayu/ui/components/message_preview.h"
 #include "ayu/ui/settings/ayu_builder.h"
 #include "ayu/ui/settings/settings_ayu_utils.h"
 #include "ayu/ui/settings/settings_main.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common.h"
 #include "styles/style_ayu_icons.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
+#include "ui/layers/generic_box.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 
@@ -445,6 +449,30 @@ void BuildMessageFieldPopups(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 	});
 }
 
+void BuildAiProvider(SectionBuilder &builder, AyuSectionBuilder &ayu) {
+	const auto session = builder.session();
+	const auto controller = builder.controller();
+	builder.addSubsectionTitle(tr::lng_ai_compose_title());
+	builder.addButton({
+		.id = u"ayu/aiProvider"_q,
+		.title = tr::ayu_AiProviderTitle(),
+		.icon = { &st::messageFieldCocoonAiIcon },
+		.label = rpl::merge(
+			rpl::single(rpl::empty_value()),
+			session->settings().aiSettingsChanges())
+			| rpl::map([=] {
+				return session->settings().aiSettings().enabled
+					? u"OpenAI-compatible"_q
+					: u"Telegram"_q;
+			}),
+		.onClick = [=] {
+			controller->show(Box(Ayu::AiProviderBox, session));
+		},
+		.keywords = { u"AI"_q, u"OpenAI"_q, u"API"_q, u"LLM"_q },
+	});
+	ayu.addSectionDivider();
+}
+
 const auto kMeta = BuildHelper({
 	.id = AyuChats::Id(),
 	.parentId = AyuMain::Id(),
@@ -461,6 +489,7 @@ const auto kMeta = BuildHelper({
 	BuildWideMessagesMultiplier(builder, ayu, previewState);
 	BuildContextMenuElements(builder, ayu);
 	BuildMessageFieldElements(builder, ayu);
+	BuildAiProvider(builder, ayu);
 	BuildMessageFieldPopups(builder, ayu);
 	builder.addSkip();
 });

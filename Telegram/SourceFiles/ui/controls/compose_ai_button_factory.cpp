@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/text/text.h"
 #include "ui/text/text_entity.h"
@@ -41,7 +42,8 @@ bool HasEnoughLinesForAi(
 		not_null<Main::Session*> session,
 		not_null<Ui::InputField*> field) {
 	if (!AyuSettings::getInstance().showAiEditorButtonInMessageField()
-		|| session->data().aiComposeTones().list().empty()) {
+		|| (!session->settings().aiSettings().enabled
+			&& session->data().aiComposeTones().list().empty())) {
 		return false;
 	}
 	const auto &style = field->st().style;
@@ -208,6 +210,7 @@ auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
 		field->changes() | rpl::to_empty,
 		field->shownValue() | rpl::to_empty,
 		session->data().aiComposeTones().updated() | rpl::to_empty,
+		session->settings().aiSettingsChanges(),
 		AyuSettings::getInstance().showAiEditorButtonInMessageFieldChanges()
 			| rpl::to_empty
 	) | rpl::on_next([=] {

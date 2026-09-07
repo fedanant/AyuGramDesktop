@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/session/session_show.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "settings/sections/settings_premium.h"
 #include "spellcheck/platform/platform_language.h"
 #include "ui/boxes/about_cocoon_box.h"
@@ -1332,6 +1333,31 @@ void ComposeAiRichBody::paintEvent(QPaintEvent *e) {
 
 // ComposeAiContent
 
+std::vector<Data::AiComposeTone> ComposeTones(
+		not_null<Main::Session*> session) {
+	auto result = session->data().aiComposeTones().list();
+	if (session->settings().aiSettings().enabled && result.empty()) {
+		result = {
+			{
+				.title = tr::ayu_AiStyleFormal(tr::now),
+				.isDefault = true,
+				.defaultType = u"formal"_q,
+			},
+			{
+				.title = tr::ayu_AiStyleShort(tr::now),
+				.isDefault = true,
+				.defaultType = u"short"_q,
+			},
+			{
+				.title = tr::ayu_AiStyleFriendly(tr::now),
+				.isDefault = true,
+				.defaultType = u"friendly"_q,
+			},
+		};
+	}
+	return result;
+}
+
 ComposeAiContent::ComposeAiContent(
 	QWidget *parent,
 	not_null<Ui::GenericBox*> box,
@@ -1345,7 +1371,7 @@ ComposeAiContent::ComposeAiContent(
 	: std::move(args.text))
 , _detectedFrom(Platform::Language::Recognize(_original.text))
 , _to(DefaultAiTranslateTo(_detectedFrom))
-, _tones(_session->data().aiComposeTones().list())
+, _tones(ComposeTones(_session))
 , _stylesData(ResolveStyleDescriptors(_tones))
 , _translateStylesData(ResolveTranslateStyleDescriptors(_session, _stylesData))
 , _preview(
@@ -1358,7 +1384,8 @@ ComposeAiContent::ComposeAiContent(
 , _authorLabel(Ui::CreateChild<Ui::FlatLabel>(
 	this,
 	st::aiComposeAuthorLabel))
-, _allowPrompt(args.allowPrompt) {
+, _allowPrompt(args.allowPrompt
+	|| _session->settings().aiSettings().enabled) {
 	if (_tones.empty()) {
 		_session->data().aiComposeTones().refresh();
 	}
@@ -1594,7 +1621,7 @@ void ComposeAiContent::refreshTones() {
 			: QString::number(prev.id);
 		hadSelection = true;
 	}
-	_tones = _session->data().aiComposeTones().list();
+	_tones = ComposeTones(_session);
 	_stylesData = ResolveStyleDescriptors(_tones);
 	_translateStylesData = ResolveTranslateStyleDescriptors(
 		_session,
@@ -1797,11 +1824,7 @@ void ComposeAiContent::updatePinnedTabs(anim::type animated) {
 void ComposeAiContent::cancelRequest() {
 	++_requestToken;
 	if (_requestId) {
-		if (_richSource) {
-			_session->api().request(_requestId).cancel();
-		} else {
-			_session->api().composeWithAi().cancel(_requestId);
-		}
+		_session->api().composeWithAi().cancel(_requestId);
 		_requestId = 0;
 	}
 }
@@ -1848,7 +1871,9 @@ void ComposeAiContent::request() {
 		break;
 	}
 
-	if (_richSource || _promptSelected) {
+	if (_richSource || (_promptSelected
+		&& (_original.text.isEmpty()
+			|| !_session->settings().aiSettings().enabled))) {
 		requestRich(std::move(request));
 		return;
 	}
@@ -1872,79 +1897,39 @@ void ComposeAiContent::request() {
 				weak->resetState(CardState::Waiting);
 				return;
 			}
-			weak->showError(error.type());
+			weak->showError(Api::ComposeWithAi::ErrorText(error));
 		});
 }
 
 void ComposeAiContent::requestRich(Api::ComposeWithAi::Request &&request) {
-	const auto source = promptRichSource();
-	const auto serialized = Iv::SerializeInputRichMessage(
-		_session,
-		*source,
-		Iv::SerializeInputRichMessageMode::Draft);
-	if (serialized.status != Iv::SerializeInputRichMessageStatus::Success
-		|| !serialized.value) {
-		showError({});
-		return;
-	}
-	using Flag = MTPmessages_composeRichMessageWithAI::Flag;
-	auto flags = MTPmessages_composeRichMessageWithAI::Flags(0)
-		| Flag::f_text;
-	if (request.proofread) {
-		flags |= Flag::f_proofread;
-	}
-	if (!request.translateToLang.isEmpty()) {
-		flags |= Flag::f_translate_to_lang;
-	}
-	if (request.tone) {
-		flags |= Flag::f_tone;
-	}
-	if (request.emojify) {
-		flags |= Flag::f_emojify;
-	}
 	const auto token = ++_requestToken;
 	const auto weak = QPointer<ComposeAiContent>(this);
-	_requestId = _session->api().request(
-		MTPmessages_ComposeRichMessageWithAI(
-			MTP_flags(flags),
-			*serialized.value,
-			(request.translateToLang.isEmpty()
-				? MTPstring()
-				: MTP_string(request.translateToLang)),
-			Api::ComposeWithAi::SerializeTone(request.tone))
-	).done([=](const MTPmessages_ComposedRichMessageWithAI &result) {
-		if (!weak || weak->_requestToken != token) {
-			return;
-		}
-		weak->_requestId = 0;
-		const auto &message = result.data().vresult();
-		auto page = Iv::ParseRichPage(weak->_session, message);
-		if (!weak->_richSource) {
-			weak->applyResult({
-				.resultText = (page
-					? Iv::FlattenRichPageToSimpleText(*page)
-					: TextWithEntities()),
-			});
-			return;
-		}
-		auto display = (weak->_mode == ComposeAiMode::Fix)
-			? Iv::ParseRichPage(
-				weak->_session,
-				message,
-				Iv::RichParseMode::DisplayTextDiff)
-			: page;
-		weak->applyRichResult(std::move(page), std::move(display));
-	}).fail([=](const MTP::Error &error) {
-		if (!weak || weak->_requestToken != token) {
-			return;
-		}
-		weak->_requestId = 0;
-		if (MTP::IgnoreError(error)) {
-			weak->resetState(CardState::Waiting);
-			return;
-		}
-		weak->showError(error.type());
-	}).handleFloodErrors().send();
+	_requestId = _session->api().composeWithAi().requestRich(
+		promptRichSource(),
+		std::move(request),
+		[=](Api::ComposeWithAi::RichResult result) {
+			if (!weak || weak->_requestToken != token) {
+				return;
+			}
+			weak->_requestId = 0;
+			if (!weak->_richSource) {
+				weak->applyResult({ .resultText = result.page
+					? Iv::FlattenRichPageToSimpleText(*result.page)
+					: TextWithEntities() });
+			} else {
+				weak->applyRichResult(std::move(result.page), std::move(result.display));
+			}
+		}, [=](const MTP::Error &error) {
+			if (!weak || weak->_requestToken != token) {
+				return;
+			}
+			weak->_requestId = 0;
+			if (MTP::IgnoreError(error)) {
+				weak->resetState(CardState::Waiting);
+				return;
+			}
+			weak->showError(Api::ComposeWithAi::ErrorText(error));
+		});
 }
 
 void ComposeAiContent::setAuthorId(UserId authorId) {
@@ -2227,12 +2212,20 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 	box->setNoContentMargin(true);
 	box->setWidth(st::boxWideWidth);
 	const auto session = args.session;
+	const auto external = !args.richSource
+		&& session->settings().aiSettings().enabled;
+	const auto showProviderInfo = [=] {
+		if (external) {
+			box->showToast(tr::ayu_AiProviderAbout(tr::now));
+		} else {
+			box->uiShow()->show(Box(Ui::AboutCocoonBox));
+		}
+	};
 	box->addTopButton(st::aiComposeBoxClose, [=] {
 		box->closeBox();
 	})->setAccessibleName(tr::lng_close(tr::now));
-	box->addTopButton(st::aiComposeBoxInfoButton, [=] {
-		box->uiShow()->show(Box(Ui::AboutCocoonBox));
-	})->setAccessibleName(tr::lng_sr_ai_compose_info(tr::now));
+	box->addTopButton(st::aiComposeBoxInfoButton, showProviderInfo
+	)->setAccessibleName(tr::lng_sr_ai_compose_info(tr::now));
 
 	const auto body = box->verticalLayout();
 	const auto tabsSkip = QMargins(0, 0, 0, st::aiComposeBoxStyleTabsSkip);
@@ -2255,7 +2248,7 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 
 	content->setModeTabs(tabs);
 
-	const auto allowPrompt = args.allowPrompt;
+	const auto allowPrompt = args.allowPrompt || external;
 	const auto promptLimit = allowPrompt
 		? session->appConfig().get<int>(
 			u"aicompose_tone_prompt_length_max"_q,
@@ -2485,9 +2478,8 @@ void ComposeAiBox(not_null<Ui::GenericBox*> box, ComposeAiBoxArgs &&args) {
 		box->addTopButton(st::aiComposeBoxClose, [=] {
 			box->closeBox();
 		})->setAccessibleName(tr::lng_close(tr::now));
-		box->addTopButton(st::aiComposeBoxInfoButton, [=] {
-			box->uiShow()->show(Box(Ui::AboutCocoonBox));
-		})->setAccessibleName(tr::lng_sr_ai_compose_info(tr::now));
+		box->addTopButton(st::aiComposeBoxInfoButton, showProviderInfo
+		)->setAccessibleName(tr::lng_sr_ai_compose_info(tr::now));
 
 		if (*premiumFlooded) {
 			auto helper = Ui::Text::CustomEmojiHelper();

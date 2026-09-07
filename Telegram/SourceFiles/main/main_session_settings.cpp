@@ -95,6 +95,10 @@ QByteArray SessionSettings::serialize() const {
 	for (const auto &id : _extraFavoriteReactions) {
 		size += sizeof(quint64) + Serialize::stringSize(id.emoji());
 	}
+	size += sizeof(qint32)
+		+ Serialize::stringSize(_aiSettings.baseUrl)
+		+ Serialize::stringSize(_aiSettings.model)
+		+ Serialize::stringSize(_aiSettings.apiKey);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -187,6 +191,11 @@ QByteArray SessionSettings::serialize() const {
 		for (const auto &id : _extraFavoriteReactions) {
 			stream << quint64(id.custom()) << id.emoji();
 		}
+		stream
+			<< qint32(_aiSettings.enabled ? 1 : 0)
+			<< _aiSettings.baseUrl
+			<< _aiSettings.model
+			<< _aiSettings.apiKey;
 	}
 
 	Ensures(result.size() == size);
@@ -263,6 +272,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	qint32 disableSharingBoxShowsCount = 0;
 	qint32 phoneNumberHidden = 0;
 	std::vector<Data::ReactionId> extraFavoriteReactions;
+	auto aiSettings = Ayu::Ai::Settings();
 
 	stream >> versionTag;
 	if (versionTag == kVersionTag) {
@@ -745,6 +755,15 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 			}
 		}
 	}
+	if (!stream.atEnd()) {
+		auto enabled = qint32(0);
+		stream
+			>> enabled
+			>> aiSettings.baseUrl
+			>> aiSettings.model
+			>> aiSettings.apiKey;
+		aiSettings.enabled = (enabled == 1);
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for SessionSettings::addFromSerialized()"));
@@ -811,6 +830,7 @@ void SessionSettings::addFromSerialized(const QByteArray &serialized) {
 	_disableSharingBoxShowsCount = disableSharingBoxShowsCount;
 	_phoneNumberHidden = (phoneNumberHidden == 1);
 	_extraFavoriteReactions = std::move(extraFavoriteReactions);
+	_aiSettings = std::move(aiSettings);
 
 	if (version < 2) {
 		app.setLastSeenWarningSeen(appLastSeenWarningSeen == 1);

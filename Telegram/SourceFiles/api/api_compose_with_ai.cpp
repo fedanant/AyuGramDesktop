@@ -9,12 +9,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_text_entities.h"
 #include "apiwrap.h"
+#include "ayu/features/ai/ai_client.h"
+#include "ayu/features/ai/ai_rich_page.h"
 #include "base/options.h"
 #include "core/shortcuts.h"
 #include "data/data_ai_compose_tones.h"
 #include "data/data_session.h"
+#include "iv/editor/iv_editor_clipboard_import.h"
+#include "iv/iv_rich_message_serializer.h"
+#include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "ui/layers/show.h"
 #include "ui/widgets/fields/input_field.h"
 
@@ -43,6 +49,14 @@ ComposeWithAi::ComposeWithAi(not_null<ApiWrap*> api)
 , _api(&api->instance()) {
 }
 
+ComposeWithAi::~ComposeWithAi() = default;
+
+QString ComposeWithAi::ErrorText(const MTP::Error &error) {
+	return (error.type() == u"CLIENT_AI_PROVIDER"_q)
+		? error.description()
+		: error.type();
+}
+
 MTPInputAiComposeTone ComposeWithAi::SerializeTone(
 		const std::optional<ToneRef> &tone) {
 	if (!tone) {
@@ -62,6 +76,15 @@ mtpRequestId ComposeWithAi::request(
 		Request request,
 		Fn<void(Result &&)> done,
 		Fn<void(const MTP::Error &)> fail) {
+	if (_session->settings().aiSettings().enabled) {
+		const auto original = request.text;
+		return requestExternal(std::move(request), Ayu::Ai::Operation::Edit,
+			[done = std::move(done), original](QString text) {
+				done({ .resultText = (text == original.text)
+					? original
+					: tr::marked(std::move(text)) });
+			}, std::move(fail));
+	}
 	using Flag = MTPmessages_composeMessageWithAI::Flag;
 	auto flags = MTPmessages_composeMessageWithAI::Flags(0);
 	if (request.proofread) {
@@ -101,7 +124,140 @@ mtpRequestId ComposeWithAi::request(
 	}).send();
 }
 
+mtpRequestId ComposeWithAi::requestExternal(
+		Request request,
+		Ayu::Ai::Operation operation,
+		Fn<void(QString)> done,
+		Fn<void(const MTP::Error &)> fail) {
+	if (!_external) {
+		_external = std::make_unique<Ayu::Ai::Client>();
+	}
+	auto tone = QString();
+	if (request.tone) {
+		tone = request.tone->customPrompt;
+		if (tone.isEmpty() && request.tone->id) {
+			for (const auto &entry : _session->data().aiComposeTones().list()) {
+				if (entry.id == request.tone->id) {
+					tone = entry.prompt;
+					break;
+				}
+			}
+		} else if (tone.isEmpty()) {
+			tone = request.tone->defaultTone;
+		}
+	}
+	const auto id = _api.allocateRequestId();
+	_external->request(id, _session->settings().aiSettings(), {
+		.text = request.text.text,
+		.language = request.translateToLang,
+		.tone = request.tone
+			? std::make_optional(std::move(tone))
+			: std::nullopt,
+		.operation = operation,
+		.proofread = request.proofread,
+		.emojify = request.emojify,
+	}, std::move(done), [fail = std::move(fail)](Ayu::Ai::Error error) {
+		if (fail) {
+			fail(MTP::Error::Local(
+				u"AI_PROVIDER"_q,
+				Ayu::Ai::ErrorText(error)));
+		}
+	});
+	return id;
+}
+
+mtpRequestId ComposeWithAi::requestRich(
+		std::shared_ptr<const Iv::RichPage> source,
+		Request request,
+		Fn<void(RichResult)> done,
+		Fn<void(const MTP::Error &)> fail) {
+	if (_session->settings().aiSettings().enabled) {
+		if (source) {
+			request.text = tr::marked(Ayu::Ai::EncodeRichPage(*source));
+		}
+		const auto limits = Iv::ResolveRichMessageLimits(_session);
+		return requestExternal(std::move(request), source
+			? Ayu::Ai::Operation::EditDocument
+			: Ayu::Ai::Operation::Generate,
+			[=, done = std::move(done)](QString text) {
+				auto page = std::shared_ptr<Iv::RichPage>();
+				if (source) {
+					page = Ayu::Ai::DecodeRichPage(*source, text);
+				} else if (text.size() <= limits.lengthLimit) {
+					auto imported = Iv::Editor::BlocksFromMarkdown(text, limits, 0);
+					if (imported && !imported->truncated) {
+						page = std::make_shared<Iv::RichPage>();
+						page->blocks = std::move(imported->blocks);
+					} else if (!imported) {
+						page = std::make_shared<Iv::RichPage>(
+							Iv::SplitTextIntoRichPage(tr::marked(text)));
+					}
+					if (page) {
+						page->rtl = Iv::DetermineRichPageRtl(*page);
+					}
+				}
+				if (!page || page->blocks.empty()
+					|| !Iv::ValidateRichMessage(*page, limits)) {
+					fail(MTP::Error::Local(u"AI_PROVIDER"_q,
+						tr::ayu_AiProviderInvalidDocument(tr::now)));
+					return;
+				}
+				done({ .page = page, .display = page });
+			}, fail);
+}
+	auto serialized = Iv::SerializeInputRichMessageResult();
+	if (source) {
+		serialized = Iv::SerializeInputRichMessage(
+			_session, *source, Iv::SerializeInputRichMessageMode::Draft);
+		if (serialized.status != Iv::SerializeInputRichMessageStatus::Success
+			|| !serialized.value) {
+			fail(MTP::Error::Local(u"AI_PROVIDER"_q,
+				tr::ayu_AiProviderInvalidDocument(tr::now)));
+			return 0;
+		}
+	} else {
+		request.setCustomPrompt(request.text.text);
+	}
+	using Flag = MTPmessages_composeRichMessageWithAI::Flag;
+	auto flags = MTPmessages_composeRichMessageWithAI::Flags(0);
+	if (source) {
+		flags |= Flag::f_text;
+	}
+	if (request.proofread) {
+		flags |= Flag::f_proofread;
+	}
+	if (!request.translateToLang.isEmpty()) {
+		flags |= Flag::f_translate_to_lang;
+	}
+	if (request.tone) {
+		flags |= Flag::f_tone;
+	}
+	if (request.emojify) {
+		flags |= Flag::f_emojify;
+	}
+	return _api.request(MTPmessages_ComposeRichMessageWithAI(
+		MTP_flags(flags),
+		serialized.value ? *serialized.value : MTPInputRichMessage(),
+		request.translateToLang.isEmpty()
+			? MTPstring() : MTP_string(request.translateToLang),
+		SerializeTone(request.tone)
+	)).done([=, done = std::move(done)](
+			const MTPmessages_ComposedRichMessageWithAI &result) {
+		const auto &message = result.data().vresult();
+		const auto page = Iv::ParseRichPage(_session, message);
+		done({
+			.page = page,
+			.display = request.proofread
+				? Iv::ParseRichPage(_session, message, Iv::RichParseMode::DisplayTextDiff)
+				: page,
+		});
+	}).fail(std::move(fail)).handleFloodErrors().send();
+}
+
 void ComposeWithAi::cancel(mtpRequestId requestId) {
+	if (_external && _external->cancel(requestId)) {
+		return;
+	}
 	if (requestId) {
 		_api.request(requestId).cancel();
 	}
@@ -307,7 +463,7 @@ void TriggerAiApplyInPlace(
 				ClearAiApplyBoundSlug();
 				show->showToast(tr::lng_ai_compose_tone_invalid(tr::now));
 			} else {
-				show->showToast(type);
+				show->showToast(ComposeWithAi::ErrorText(error));
 			}
 		}));
 }

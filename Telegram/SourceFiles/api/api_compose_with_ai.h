@@ -11,7 +11,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h"
 
 #include <optional>
+#include <memory>
 #include <vector>
+
+namespace Ayu::Ai {
+class Client;
+enum class Operation;
+} // namespace Ayu::Ai
+
+namespace Iv {
+struct RichPage;
+} // namespace Iv
 
 class ApiWrap;
 
@@ -75,8 +85,15 @@ public:
 		TextWithEntities resultText;
 		std::optional<Diff> diffText;
 	};
+	struct RichResult {
+		std::shared_ptr<const Iv::RichPage> page;
+		std::shared_ptr<const Iv::RichPage> display;
+	};
 
 	explicit ComposeWithAi(not_null<ApiWrap*> api);
+	~ComposeWithAi();
+
+	[[nodiscard]] static QString ErrorText(const MTP::Error &error);
 
 	[[nodiscard]] static MTPInputAiComposeTone SerializeTone(
 		const std::optional<ToneRef> &tone);
@@ -86,14 +103,25 @@ public:
 		Fn<void(Result &&)> done,
 		Fn<void(const MTP::Error &)> fail = nullptr);
 	void cancel(mtpRequestId requestId);
+	mtpRequestId requestRich(
+		std::shared_ptr<const Iv::RichPage> source,
+		Request request,
+		Fn<void(RichResult)> done,
+		Fn<void(const MTP::Error &)> fail);
 
 private:
+	mtpRequestId requestExternal(
+		Request request,
+		Ayu::Ai::Operation operation,
+		Fn<void(QString)> done,
+		Fn<void(const MTP::Error &)> fail);
 	[[nodiscard]] static Diff ParseDiff(
 		not_null<Main::Session*> session,
 		const MTPTextWithEntities &text);
 
 	const not_null<Main::Session*> _session;
 	MTP::Sender _api;
+	std::unique_ptr<Ayu::Ai::Client> _external;
 
 };
 

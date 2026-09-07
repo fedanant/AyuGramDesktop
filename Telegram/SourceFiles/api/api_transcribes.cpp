@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "api/api_text_entities.h"
+#include "ayu/features/ai/ai_client.h"
+#include "ayu/features/ai/ai_rich_page.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
 #include "data/data_peer.h"
@@ -21,12 +23,34 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "spellcheck/spellcheck_types.h"
+#include "window/window_session_controller.h"
 
 namespace Api {
 
 Transcribes::Transcribes(not_null<ApiWrap*> api)
 : _session(&api->session())
 , _api(&api->instance()) {
+	_session->settings().aiSettingsChanges() | rpl::on_next([=] {
+		clearSummaries();
+	}, _lifetime);
+}
+
+Transcribes::~Transcribes() = default;
+
+void Transcribes::clearSummaries() {
+	const auto summaries = base::take(_summaries);
+	for (const auto &[id, entry] : summaries) {
+		if (entry.requestId) {
+			if (entry.external) {
+				_external->cancel(entry.requestId);
+			} else {
+				_api.request(entry.requestId).cancel();
+			}
+		}
+		if (const auto item = _session->data().message(id)) {
+			_session->data().requestItemTextRefresh(item);
+		}
+	}
 }
 
 bool Transcribes::isRated(not_null<HistoryItem*> item) const {
@@ -242,51 +266,83 @@ void Transcribes::summarize(not_null<HistoryItem*> item) {
 	}
 
 	const auto id = item->fullId();
+	auto &entry = _summaries[id];
+	if (entry.requestId) {
+		if (entry.external) {
+			_external->cancel(entry.requestId);
+		} else {
+			_api.request(entry.requestId).cancel();
+		}
+	}
+	entry.requestId = 0;
+	entry.external = _session->settings().aiSettings().enabled;
+	entry.premiumRequired = false;
+	entry.shown = true;
+	entry.loading = true;
 	const auto translatedTo = item->history()->translatedTo();
-	const auto langCode = translatedTo
-		? translatedTo.twoLetterCode()
-		: QString();
-	const auto requestId = _api.request(MTPmessages_SummarizeText(
-		langCode.isEmpty()
-			? MTP_flags(0)
-			: MTP_flags(MTPmessages_summarizeText::Flag::f_to_lang),
-		item->history()->peer->input(),
-		MTP_int(item->id),
-		langCode.isEmpty() ? MTPstring() : MTP_string(langCode),
-		MTPstring() // tone
-	)).done([=](const MTPTextWithEntities &result) {
-		const auto &data = result.data();
+	const auto langCode = translatedTo ? translatedTo.twoLetterCode() : QString();
+	const auto completed = [=](TextWithEntities result) {
 		auto &entry = _summaries[id];
 		entry.requestId = 0;
 		entry.loading = false;
 		entry.premiumRequired = false;
 		entry.languageId = translatedTo;
-		entry.result = TextWithEntities{
-			qs(data.vtext()),
-			Api::EntitiesFromMTP(_session, data.ventities().v)
-		};
+		entry.result = std::move(result);
 		if (const auto item = _session->data().message(id)) {
+			if (item->history()->translatedTo() != translatedTo) {
+				summarize(item);
+				return;
+			}
 			_session->data().requestItemTextRefresh(item);
 			_session->data().requestItemShowHighlight(item);
 		}
-	}).fail([=](const MTP::Error &error) {
+	};
+	const auto failed = [=](bool premiumRequired, const QString &error) {
 		auto &entry = _summaries[id];
-		if (error.type() == u"SUMMARY_FLOOD_PREMIUM"_q) {
-			entry.premiumRequired = true;
-		}
+		entry.premiumRequired = premiumRequired;
 		entry.requestId = 0;
 		entry.shown = false;
 		entry.loading = false;
+		entry.result = {};
 		if (const auto item = _session->data().message(id)) {
 			_session->data().requestItemTextRefresh(item);
+			if (!error.isEmpty()) {
+				if (const auto window = _session->tryResolveWindow(item->history()->peer)) {
+					window->showToast(error);
+				}
+			}
 		}
-	}).send();
-
-	auto &entry = _summaries.emplace(id).first->second;
-	entry.requestId = requestId;
-	entry.shown = true;
-	entry.loading = true;
-
+	};
+	if (entry.external) {
+		if (!_external) {
+			_external = std::make_unique<Ayu::Ai::Client>();
+		}
+		const auto page = item->richPage();
+		entry.requestId = _api.allocateRequestId();
+		_external->request(entry.requestId, _session->settings().aiSettings(), {
+			.text = page ? Ayu::Ai::RichPageText(*page) : item->originalText().text,
+			.language = langCode,
+			.operation = Ayu::Ai::Operation::Summarize,
+		}, [=](QString text) {
+			completed(tr::marked(std::move(text)));
+		}, [=](Ayu::Ai::Error error) {
+			failed(false, Ayu::Ai::ErrorText(error));
+		});
+	} else {
+		entry.requestId = _api.request(MTPmessages_SummarizeText(
+			langCode.isEmpty()
+				? MTP_flags(0)
+				: MTP_flags(MTPmessages_summarizeText::Flag::f_to_lang),
+			item->history()->peer->input(),
+			MTP_int(item->id),
+			langCode.isEmpty() ? MTPstring() : MTP_string(langCode),
+			MTPstring() // tone
+		)).done([=](const MTPTextWithEntities &result) {
+			completed(ParseTextWithEntities(_session, result));
+		}).fail([=](const MTP::Error &error) {
+			failed(error.type() == u"SUMMARY_FLOOD_PREMIUM"_q, {});
+		}).send();
+	}
 	item->setHasSummaryEntry();
 	_session->data().requestItemResize(item);
 }
@@ -301,7 +357,7 @@ void Transcribes::checkSummaryToTranslate(FullMsgId id) {
 		return;
 	}
 	const auto translatedTo = item->history()->translatedTo();
-	if (i->second.languageId != translatedTo) {
+	if (i->second.languageId != translatedTo && !i->second.loading) {
 		i->second.result = tr::lng_contacts_loading(tr::now, tr::italic);
 		summarize(item);
 	}

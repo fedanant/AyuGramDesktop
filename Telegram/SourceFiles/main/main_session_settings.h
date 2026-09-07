@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "ayu/features/ai/ai_settings.h"
 #include "data/data_auto_download.h"
 #include "data/notify/data_peer_notify_settings.h"
 #include "data/data_authorization.h"
@@ -33,6 +34,20 @@ public:
 
 	[[nodiscard]] QByteArray serialize() const;
 	void addFromSerialized(const QByteArray &serialized);
+
+	[[nodiscard]] const Ayu::Ai::Settings &aiSettings() const {
+		return _aiSettings;
+	}
+	void setAiSettings(Ayu::Ai::Settings settings) {
+		if (_aiSettings == settings) {
+			return;
+		}
+		_aiSettings = std::move(settings);
+		_aiSettingsChanges.fire({});
+	}
+	[[nodiscard]] rpl::producer<> aiSettingsChanges() const {
+		return _aiSettingsChanges.events();
+	}
 
 	void setSupportSwitch(Support::SwitchSettings value) {
 		_supportSwitch = value;
@@ -250,6 +265,8 @@ private:
 	rpl::variable<bool> _phoneNumberHidden = false;
 
 	std::vector<Data::ReactionId> _extraFavoriteReactions;
+	Ayu::Ai::Settings _aiSettings;
+	rpl::event_stream<> _aiSettingsChanges;
 
 };
 

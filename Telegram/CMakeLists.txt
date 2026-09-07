@@ -111,6 +111,16 @@ PRIVATE
 )
 
 set(ayugram_files
+        ayu/features/ai/ai_settings.h
+        ayu/features/ai/ai_settings.cpp
+        ayu/features/ai/ai_client.h
+        ayu/features/ai/ai_client.cpp
+        ayu/features/ai/ai_document.h
+        ayu/features/ai/ai_document.cpp
+        ayu/features/ai/ai_rich_page.h
+        ayu/features/ai/ai_rich_page.cpp
+        ayu/ui/boxes/ai_provider_box.h
+        ayu/ui/boxes/ai_provider_box.cpp
         ayu/ayu_worker.cpp
         ayu/ayu_worker.h
         ayu/ayu_url_handlers.cpp

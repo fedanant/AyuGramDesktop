@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/create_ai_box.h"
 
+#include "api/api_compose_with_ai.h"
+#include "apiwrap.h"
 #include "base/object_ptr.h"
 #include "base/weak_ptr.h"
 #include "boxes/create_ai_tone_box.h"
@@ -25,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "mtproto/mtproto_response.h"
 #include "mtproto/sender.h"
 #include "spellcheck/spellcheck_types.h"
@@ -375,12 +378,14 @@ void ResponseIsland::resizeEvent(QResizeEvent *e) {
 
 struct State {
 	explicit State(not_null<Main::Session*> session)
-	: session(session)
-	, api(&session->mtp()) {
+	: session(session) {
+	}
+
+	~State() {
+		session->api().composeWithAi().cancel(requestId);
 	}
 
 	not_null<Main::Session*> session;
-	MTP::Sender api;
 	Fn<void(std::shared_ptr<const RichPage>)> applyToPage;
 	mtpRequestId requestId = 0;
 	Ui::InputField *prompt = nullptr;
@@ -474,7 +479,7 @@ void CreateAiBox(not_null<Ui::GenericBox*> box, CreateAiBoxArgs &&args) {
 	state->prompt->changes(
 	) | rpl::on_next([=] {
 		state->updateGenerateEnabled();
-		if (!state->page) {
+		if (!state->page && !state->requestId) {
 			return;
 		}
 		if (const auto wrap = state->responseWrap) {
@@ -489,7 +494,7 @@ void CreateAiBox(not_null<Ui::GenericBox*> box, CreateAiBoxArgs &&args) {
 		}
 		state->page = nullptr;
 		state->phase = State::Phase::Initial;
-		state->api.request(base::take(state->requestId)).cancel();
+		state->session->api().composeWithAi().cancel(base::take(state->requestId));
 		state->loading = false;
 		state->rebuildButtons();
 	}, prompt->lifetime());
@@ -571,7 +576,11 @@ void CreateAiBox(not_null<Ui::GenericBox*> box, CreateAiBoxArgs &&args) {
 			box->closeBox();
 		})->setAccessibleName(tr::lng_close(tr::now));
 		box->addTopButton(st::aiComposeBoxInfoButton, [=] {
-			box->uiShow()->show(Box(Ui::AboutCocoonBox));
+			if (state->session->settings().aiSettings().enabled) {
+				box->showToast(tr::ayu_AiProviderAbout(tr::now));
+			} else {
+				box->uiShow()->show(Box(Ui::AboutCocoonBox));
+			}
 		})->setAccessibleName(tr::lng_sr_ai_compose_info(tr::now));
 		state->primaryButton = nullptr;
 		if (state->phase == State::Phase::HasResult) {
@@ -605,40 +614,27 @@ void CreateAiBox(not_null<Ui::GenericBox*> box, CreateAiBoxArgs &&args) {
 			|| prompt.size() > promptLimit) {
 			return;
 		}
-		state->api.request(base::take(state->requestId)).cancel();
+		state->session->api().composeWithAi().cancel(base::take(state->requestId));
 		state->phase = State::Phase::Loading;
 		state->loading = true;
 		state->enterLoading();
 
-		using Flag = MTPmessages_composeRichMessageWithAI::Flag;
-		auto flags = MTPmessages_composeRichMessageWithAI::Flags(0)
-			| Flag::f_tone;
-		if (state->emojify) {
-			flags |= Flag::f_emojify;
-		}
-		const auto lang = state->language
-			? state->language.twoLetterCode()
-			: QString();
-		if (!lang.isEmpty()) {
-			flags |= Flag::f_translate_to_lang;
-		}
-		state->requestId = state->api.request(
-			MTPmessages_ComposeRichMessageWithAI(
-				MTP_flags(flags),
-				MTPInputRichMessage(),
-				lang.isEmpty() ? MTPstring() : MTP_string(lang),
-				MTP_inputAiComposeToneSingleUse(MTP_string(prompt)))
-		).done([=](const MTPmessages_ComposedRichMessageWithAI &result) {
+		state->requestId = state->session->api().composeWithAi().requestRich(
+			nullptr,
+			{
+				.text = tr::marked(prompt),
+				.translateToLang = state->language.twoLetterCode(),
+				.emojify = state->emojify,
+			},
+			[=](Api::ComposeWithAi::RichResult result) {
 			state->requestId = 0;
 			state->loading = false;
-			state->page = Iv::ParseRichPage(
-				state->session,
-				result.data().vresult());
+			state->page = std::move(result.page);
 			state->phase = State::Phase::HasResult;
 			state->rebuildResponseIsland();
 			state->rebuildButtons();
 			state->prompt->clearFocus();
-		}).fail([=](const MTP::Error &error) {
+		}, [=](const MTP::Error &error) {
 			state->requestId = 0;
 			state->loading = false;
 			state->phase = state->page
@@ -648,8 +644,8 @@ void CreateAiBox(not_null<Ui::GenericBox*> box, CreateAiBoxArgs &&args) {
 			if (MTP::IgnoreError(error)) {
 				return;
 			}
-			box->showToast(error.type());
-		}).handleFloodErrors().send();
+			box->showToast(Api::ComposeWithAi::ErrorText(error));
+		});
 	};
 
 	state->rebuildButtons();

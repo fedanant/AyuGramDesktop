@@ -1822,7 +1822,8 @@ void WindowHost::Impl::setupWindow(ShowWindowDescriptor &&descriptor) {
 		button->setAccessibleName(tr::lng_ai_compose_title(tr::now));
 		button->setClickedCallback([=] {
 			const auto premiumRequired = [=] {
-				if (SessionPremium(session)) {
+				if (SessionPremium(session)
+					|| session->settings().aiSettings().enabled) {
 					return false;
 				}
 				ShowRichMessagesPremiumToast(_show);

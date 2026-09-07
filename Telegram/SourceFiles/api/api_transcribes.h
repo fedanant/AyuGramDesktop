@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class ApiWrap;
 
+namespace Ayu::Ai {
+class Client;
+} // namespace Ayu::Ai
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -24,12 +28,14 @@ struct SummaryEntry {
 	bool shown = false;
 	bool loading = false;
 	bool premiumRequired = false;
+	bool external = false;
 	mtpRequestId requestId = 0;
 };
 
 class Transcribes final {
 public:
 	explicit Transcribes(not_null<ApiWrap*> api);
+	~Transcribes();
 
 	struct Entry {
 		QString result;
@@ -63,9 +69,11 @@ public:
 private:
 	void load(not_null<HistoryItem*> item);
 	void summarize(not_null<HistoryItem*> item);
+	void clearSummaries();
 
 	const not_null<Main::Session*> _session;
 	MTP::Sender _api;
+	std::unique_ptr<Ayu::Ai::Client> _external;
 
 	int _trialsCount = -1;
 	std::optional<bool> _trialsSupport;
@@ -75,6 +83,7 @@ private:
 	base::flat_map<uint64, FullMsgId> _ids;
 
 	base::flat_map<FullMsgId, SummaryEntry> _summaries;
+	rpl::lifetime _lifetime;
 
 };
 
