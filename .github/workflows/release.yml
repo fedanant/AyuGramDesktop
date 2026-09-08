@@ -183,6 +183,9 @@ jobs:
       - name: Test universal bundle assembly
         run: python3 -m unittest discover -s .github/scripts -p 'test_merge_macos_apps.py'
 
+      - name: Check Xcode compiler flags
+        run: python3 .github/scripts/check_macos_compiler_flags.py
+
       - name: Restore prepared dependency archive
         id: dependencies
         continue-on-error: true
