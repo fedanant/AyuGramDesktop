@@ -1,4 +1,5 @@
 import os, sys
+from pathlib import Path
 
 NEW_SWIFT_CONTENT = '''// This file is part of Desktop App Toolkit,
 // a set of libraries for developing nice desktop applications.
@@ -40,8 +41,22 @@ func TranslateProviderMacSwiftTranslate(
 }
 '''
 
+def patch_tgcalls_crypto_header(path):
+    content = path.read_text(encoding='utf-8')
+    old = 'extern "C" {\n#include <cstdint>\n'
+    new = '#include <cstdint>\n\nextern "C" {\n'
+    if content.count(old) == 1:
+        path.write_text(content.replace(old, new, 1), encoding='utf-8')
+        print(f"Successfully patched {path}")
+    elif old not in content and content.count(new) == 1:
+        print(f"Already patched {path}")
+    else:
+        raise RuntimeError(f"Unexpected tgcalls CryptoHelper header: {path}")
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    patch_tgcalls_crypto_header(Path(root) / 'Telegram/ThirdParty/tgcalls/tgcalls/CryptoHelper.h')
     swift_file = os.path.join(root, 'Telegram', 'lib_translate', 'translate_provider_mac_swift.swift')
     if os.path.exists(swift_file):
         with open(swift_file, 'w', encoding='utf-8') as f:

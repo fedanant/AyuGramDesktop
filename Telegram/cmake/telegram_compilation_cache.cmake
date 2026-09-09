@@ -35,8 +35,6 @@ function(ayugram_cache_targets directory)
                 XCODE_ATTRIBUTE_CLANG_ENABLE_MODULES NO
                 XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE NO
                 XCODE_ATTRIBUTE_CLANG_USE_RESPONSE_FILE NO
-                XCODE_ATTRIBUTE_OTHER_CFLAGS "$(inherited) -Xclang -fno-pch-timestamp"
-                XCODE_ATTRIBUTE_OTHER_CPLUSPLUSFLAGS "$(inherited) -Xclang -fno-pch-timestamp"
             )
         elseif (MSVC)
             set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT Embedded)
