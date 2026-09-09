@@ -50,19 +50,23 @@ int cpp_probe() { return PROBE_OPTION; }
         # env forwards compiler arguments unchanged and works as a launcher.
         # The same helper still runs its Xcode target setup, which previously
         # replaced the standard, PCH flags and target-specific options.
-        subprocess.run([
-            "cmake", "-S", str(source), "-B", str(root / "build"), "-G", "Xcode",
-            f"-DHELPER_FILE={helper.as_posix()}",
-            "-DAYUGRAM_ENABLE_COMPILATION_CACHE=ON",
-            "-DAYUGRAM_SCCACHE_EXECUTABLE=/usr/bin/env",
-            "-DCMAKE_CONFIGURATION_TYPES=Debug",
-            "-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO",
-        ], check=True)
-        subprocess.run([
-            "cmake", "--build", str(root / "build"), "--config", "Debug",
-            "--parallel", "2",
-        ], check=True)
-        print("Xcode preserved C/C++/Objective-C++ options, C++20 and precompiled headers.")
+        for arch in ("x86_64", "arm64"):
+            build = root / f"build-{arch}"
+            subprocess.run([
+                "cmake", "-S", str(source), "-B", str(build), "-G", "Xcode",
+                f"-DHELPER_FILE={helper.as_posix()}",
+                f"-DCMAKE_OSX_ARCHITECTURES={arch}",
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13",
+                "-DAYUGRAM_ENABLE_COMPILATION_CACHE=ON",
+                "-DAYUGRAM_SCCACHE_EXECUTABLE=/usr/bin/env",
+                "-DCMAKE_CONFIGURATION_TYPES=Debug",
+                "-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO",
+            ], check=True)
+            subprocess.run([
+                "cmake", "--build", str(build), "--config", "Debug",
+                "--parallel", "2",
+            ], check=True)
+            print(f"Xcode preserved {arch} C/C++/Objective-C++ options, C++20 and precompiled headers.")
 
 
 if __name__ == "__main__":

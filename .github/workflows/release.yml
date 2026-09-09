@@ -243,6 +243,7 @@ jobs:
         arch: [x86_64, arm64]
     env:
       MAC_ARCH: ${{ matrix.arch }}
+      CLANG_CRASH_DIAGNOSTICS_DIR: ${{ github.workspace }}/out/clang-crash-reports
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_VERSION: ayugram-macos-v2
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -309,10 +310,26 @@ jobs:
             -D CMAKE_CXX_FLAGS="-Xclang -fno-pch-timestamp"
 
       - name: Build AyuGram
+        id: build
         run: |
+          mkdir -p "$CLANG_CRASH_DIAGNOSTICS_DIR"
           cmake --build out --config Release --target Telegram \
             --parallel "$(sysctl -n hw.logicalcpu)" -- \
+            -resultBundlePath "$RUNNER_TEMP/macos-build-$MAC_ARCH.xcresult" \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload macOS compiler diagnostics
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-macOS-diagnostics-${{ matrix.arch }}
+          path: |
+            out/clang-crash-reports
+            ${{ runner.temp }}/macos-build-${{ matrix.arch }}.xcresult
+            ~/Library/Logs/DiagnosticReports/clang*
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: warn
 
       - name: Report compilation cache statistics
         if: always() && steps.sccache.outcome == 'success'
@@ -356,7 +373,7 @@ jobs:
 
       - name: Select Xcode and install packaging tools
         run: |
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           brew install create-dmg
 
       - name: Download Intel app bundle

@@ -16,7 +16,7 @@ runs:
       id: xcode
       shell: bash
       run: |
-        sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+        sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
         selected_developer_dir="$(xcode-select -p)"
         selected_xcode="$(cd "$selected_developer_dir/../.." && pwd -P)"
         test -x "$selected_xcode/Contents/Developer/usr/bin/xcodebuild"
@@ -29,6 +29,7 @@ runs:
         done
 
         xcodebuild -version
+        xcrun clang --version
         toolchain=$( { xcodebuild -version; xcrun --sdk macosx --show-sdk-build-version; } | shasum -a 256 | cut -d ' ' -f 1)
         echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
         df -h "$GITHUB_WORKSPACE"
