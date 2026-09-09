@@ -4,7 +4,12 @@ from pathlib import Path
 
 
 def main():
-    helper = Path(__file__).resolve().parents[2] / "Telegram/cmake/telegram_compilation_cache.cmake"
+    repo = Path(__file__).resolve().parents[2]
+    helper = repo / "Telegram/cmake/telegram_compilation_cache.cmake"
+    tgcalls = repo / "Telegram/ThirdParty/tgcalls/tgcalls"
+    openssl = Path(subprocess.check_output([
+        "brew", "--prefix", "openssl@3",
+    ], text=True).strip())
     with tempfile.TemporaryDirectory(prefix="ayugram compiler flags ") as temporary:
         root = Path(temporary)
         source = root / "source"
@@ -28,6 +33,9 @@ foreach(language cxx objcxx)
     target_compile_options(${language}_probe PRIVATE -DPROBE_OPTION=1)
     target_precompile_headers(${language}_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/pch.h")
 endforeach()
+add_library(tgcalls_crypto_probe STATIC "${TGCALLS_SOURCE_DIR}/CryptoHelper.cpp")
+target_compile_features(tgcalls_crypto_probe PRIVATE cxx_std_20)
+target_include_directories(tgcalls_crypto_probe PRIVATE "${OPENSSL_INCLUDE_DIR}")
 """)
         (app / "probe.c").write_text("""#ifndef PROBE_OPTION
 #error C compiler options were overwritten
@@ -55,6 +63,8 @@ int cpp_probe() { return PROBE_OPTION; }
             subprocess.run([
                 "cmake", "-S", str(source), "-B", str(build), "-G", "Xcode",
                 f"-DHELPER_FILE={helper.as_posix()}",
+                f"-DTGCALLS_SOURCE_DIR={tgcalls.as_posix()}",
+                f"-DOPENSSL_INCLUDE_DIR={(openssl / 'include').as_posix()}",
                 f"-DCMAKE_OSX_ARCHITECTURES={arch}",
                 "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.13",
                 "-DAYUGRAM_ENABLE_COMPILATION_CACHE=ON",
@@ -67,6 +77,7 @@ int cpp_probe() { return PROBE_OPTION; }
                 "--parallel", "2",
             ], check=True)
             print(f"Xcode preserved {arch} C/C++/Objective-C++ options, C++20 and precompiled headers.")
+            print(f"Xcode compiled the tgcalls CryptoHelper for {arch}.")
 
 
 if __name__ == "__main__":

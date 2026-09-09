@@ -184,7 +184,9 @@ jobs:
         run: python3 -m unittest discover -s .github/scripts -p 'test_merge_macos_apps.py'
 
       - name: Check Xcode compiler flags
-        run: python3 .github/scripts/check_macos_compiler_flags.py
+        run: |
+          python3 Telegram/build/patch_mac.py
+          python3 .github/scripts/check_macos_compiler_flags.py
 
       - name: Restore prepared dependency archive
         id: dependencies
@@ -280,7 +282,7 @@ jobs:
           rm -- "$RUNNER_TEMP/macos-dependencies.tar.zst"
           df -h "$GITHUB_WORKSPACE"
 
-      - name: Patch macOS Swift files
+      - name: Patch macOS source compatibility
         run: python3 Telegram/build/patch_mac.py
 
       - name: Set up compilation cache

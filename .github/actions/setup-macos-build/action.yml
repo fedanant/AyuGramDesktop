@@ -36,4 +36,4 @@ runs:
 
     - name: Install Homebrew dependencies
       shell: bash
-      run: brew install automake libtool cmake wget pkg-config gnu-tar ninja nasm meson zstd
+      run: brew install automake libtool cmake wget pkg-config gnu-tar ninja nasm meson zstd openssl@3
